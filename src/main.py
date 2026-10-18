@@ -17,8 +17,19 @@ def macro():
         running = False
         return
 
-    pyautogui.moveTo(*fish_position, duration=1.0)
-    time.sleep(0.8)
+    print(f"Moving to Fish button: {fish_position}")
+
+    # Move the mouse smoothly, similar to the old AutoHotkey macro
+    pyautogui.moveTo(
+        fish_position.x,
+        fish_position.y,
+        duration=0.3
+    )
+
+    # Give Roblox a moment to recognize the hover
+    time.sleep(0.25)
+
+    # Click the Fish button
     pyautogui.click()
 
     print("Fish button clicked!")
@@ -31,18 +42,23 @@ def save_fish_position():
     global fish_position
 
     fish_position = pyautogui.position()
+
+    print()
+    print("================================")
     print(f"Fish button position saved: {fish_position}")
+    print("================================")
+    print()
 
 
 def toggle_macro():
     global running
 
-    running = not running
-
     if running:
-        threading.Thread(target=macro, daemon=True).start()
-    else:
+        running = False
         print("Macro stopped!")
+    else:
+        running = True
+        threading.Thread(target=macro, daemon=True).start()
 
 
 def emergency_stop():
@@ -57,8 +73,10 @@ keyboard.add_hotkey("f8", toggle_macro)
 keyboard.add_hotkey("f3", emergency_stop)
 
 print("Sol's Fishing Macro")
+print()
 print("Hover over the Fish button and press F7.")
 print("Press F8 to start/stop.")
 print("Press F3 for emergency stop.")
+print()
 
 keyboard.wait()
