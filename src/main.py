@@ -1,10 +1,61 @@
 import time
 import threading
+import ctypes
 import pyautogui
 import keyboard
 
 running = False
 fish_position = None
+
+user32 = ctypes.windll.user32
+
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+
+
+def native_move_to(x, y):
+    """Move the mouse using Windows native cursor movement."""
+    start_x, start_y = user32.GetCursorPos(ctypes.byref(POINT()))
+
+    point = POINT()
+    user32.GetCursorPos(ctypes.byref(point))
+
+    start_x = point.x
+    start_y = point.y
+
+    distance = max(abs(x - start_x), abs(y - start_y))
+
+    if distance == 0:
+        return
+
+    # Similar idea to the old AHK MouseMove speed:
+    # move in many small steps instead of teleporting.
+    steps = max(20, int(distance / 8))
+
+    for i in range(1, steps + 1):
+        if not running:
+            return
+
+        new_x = int(start_x + (x - start_x) * i / steps)
+        new_y = int(start_y + (y - start_y) * i / steps)
+
+        user32.SetCursorPos(new_x, new_y)
+        time.sleep(0.008)
+
+
+def native_click():
+    """Perform a native Windows left click."""
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.05)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+
+class POINT(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_long),
+        ("y", ctypes.c_long),
+    ]
 
 
 def macro():
@@ -19,19 +70,21 @@ def macro():
 
     print(f"Moving to Fish button: {fish_position}")
 
-    # Fast, smooth mouse movement
-    pyautogui.moveTo(
+    native_move_to(
         fish_position.x,
-        fish_position.y,
-        duration=0.1,
-        tween=pyautogui.linear
+        fish_position.y
     )
 
-    # Give Roblox a moment to recognize the cursor
+    if not running:
+        return
+
+    # Same kind of pause used by the old macro.
     time.sleep(0.25)
 
-    # Click the Fish button
-    pyautogui.click()
+    if not running:
+        return
+
+    native_click()
 
     print("Fish button clicked!")
 
