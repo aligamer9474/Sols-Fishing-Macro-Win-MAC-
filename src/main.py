@@ -2,6 +2,7 @@ import time
 import threading
 import ctypes
 import keyboard
+import pyautogui
 
 running = False
 
@@ -9,10 +10,10 @@ running = False
 # COORDINATES
 # ============================================================
 
-# Already tested and confirmed working
+# Confirmed working Fish button
 FISH_BUTTON = (853, 832)
 
-# We will fill these in after testing/calibrating them
+# These will be calibrated later
 FISH_CAUGHT_X = None
 COLLECTIONS_BUTTON = None
 COLLECTIONS_CLOSE_X = None
@@ -21,13 +22,36 @@ SELL_ALL_BUTTON = None
 SHOP_CLOSE_X = None
 
 # ============================================================
+# FISHING MINIGAME COORDINATES
+# ============================================================
+
+# Based on the old macro.
+# These are screen coordinates at 1080p.
+
+MINIGAME_START_PIXEL = (1176, 836)
+
+BAR_SAMPLE_POINT = (955, 767)
+
+BAR_SCAN_LEFT = 757
+BAR_SCAN_RIGHT = 1161
+BAR_SCAN_Y = 767
+
+# How wide the detected bar must be before we consider
+# ourselves inside the target area.
+ADVANCED_FISHING_THRESHOLD = 25
+
+# Small delay between pixel checks
+MINIGAME_SCAN_DELAY = 0.01
+
+# Maximum amount of time to wait for the minigame
+MINIGAME_TIMEOUT = 10
+
+# ============================================================
 # SETTINGS
 # ============================================================
 
-# How many fishing cycles before going to sell
 MAX_FISHING_CYCLES = 15
 
-# Time between actions
 CLICK_DELAY = 0.25
 
 # ============================================================
@@ -55,12 +79,6 @@ def get_mouse_position():
 
 
 def native_move_to(x, y):
-    """
-    Move the mouse using Windows mouse movement events.
-
-    This is the method that successfully made Roblox
-    recognize the Fish button hover.
-    """
 
     start_x, start_y = get_mouse_position()
 
@@ -154,6 +172,43 @@ def click_position(position, name="button"):
 
 
 # ============================================================
+# PIXEL FUNCTIONS
+# ============================================================
+
+def get_pixel(x, y):
+
+    try:
+        return pyautogui.pixel(x, y)
+    except Exception:
+        return None
+
+
+def colors_match(color1, color2, tolerance=5):
+
+    if color1 is None or color2 is None:
+        return False
+
+    return all(
+        abs(color1[i] - color2[i]) <= tolerance
+        for i in range(3)
+    )
+
+
+def is_white_pixel(x, y):
+
+    color = get_pixel(x, y)
+
+    if color is None:
+        return False
+
+    return (
+        color[0] >= 245
+        and color[1] >= 245
+        and color[2] >= 245
+    )
+
+
+# ============================================================
 # FISHING
 # ============================================================
 
@@ -168,20 +223,214 @@ def start_fishing():
     )
 
 
+def wait_for_minigame():
+
+    print("Waiting for fishing minigame...")
+
+    start_time = time.time()
+
+    while running:
+
+        if time.time() - start_time >= MINIGAME_TIMEOUT:
+            print("[!] Timed out waiting for minigame.")
+            return False
+
+        if is_white_pixel(
+            MINIGAME_START_PIXEL[0],
+            MINIGAME_START_PIXEL[1]
+        ):
+            print("Fishing minigame detected!")
+            return True
+
+        time.sleep(MINIGAME_SCAN_DELAY)
+
+    return False
+
+
+def find_bar_color():
+
+    """
+    The fishing bar color is randomized.
+
+    The old macro sampled a pixel around the middle
+    of the fishing bar to determine the current color.
+    """
+
+    color = get_pixel(
+        BAR_SAMPLE_POINT[0],
+        BAR_SAMPLE_POINT[1]
+    )
+
+    if color is None:
+        return None
+
+    # Ignore almost-white pixels.
+    if (
+        color[0] > 240
+        and color[1] > 240
+        and color[2] > 240
+    ):
+        return None
+
+    # Ignore nearly-black pixels.
+    if (
+        color[0] < 15
+        and color[1] < 15
+        and color[2] < 15
+    ):
+        return None
+
+    return color
+
+
+def find_contiguous_bar_width(bar_color):
+
+    """
+    Scan across the fishing bar and determine how many
+    matching pixels are next to each other.
+
+    This follows the basic detection idea from the old macro.
+    """
+
+    if bar_color is None:
+        return 0
+
+    width = 0
+    best_width = 0
+
+    screenshot = pyautogui.screenshot(
+        region=(
+            BAR_SCAN_LEFT,
+            BAR_SCAN_Y,
+            BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1,
+            1
+        )
+    )
+
+    for x in range(
+        BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1
+    ):
+
+        pixel = screenshot.getpixel((x, 0))
+
+        if colors_match(
+            pixel,
+            bar_color,
+            tolerance=10
+        ):
+
+            width += 1
+
+            if width > best_width:
+                best_width = width
+
+        else:
+
+            width = 0
+
+    return best_width
+
+
 def play_fishing_minigame():
 
-    print("Fishing minigame started.")
+    print()
+    print("=== FISHING MINIGAME ===")
 
-    # --------------------------------------------------------
-    # THIS IS THE PART WE WILL BUILD NEXT.
-    #
-    # The old macro used pixel/color detection to watch the
-    # fishing bar and determine when to click.
-    #
-    # We are NOT guessing the colors yet.
-    # --------------------------------------------------------
+    if not wait_for_minigame():
+        return False
 
-    print("[!] Fishing minigame detection is not coded yet.")
+    print("Reading fishing bar color...")
+
+    bar_color = None
+
+    # Give the game a moment to fully render the bar.
+    time.sleep(0.1)
+
+    # Try several times to find the randomized color.
+    for _ in range(20):
+
+        if not running:
+            return False
+
+        bar_color = find_bar_color()
+
+        if bar_color is not None:
+            break
+
+        time.sleep(0.02)
+
+    if bar_color is None:
+
+        print("[!] Could not detect fishing bar color.")
+        print("[!] Stopping so we don't randomly click.")
+
+        return False
+
+    print(f"Detected bar color: {bar_color}")
+
+    print("Watching fishing bar...")
+
+    start_time = time.time()
+
+    while running:
+
+        if time.time() - start_time >= MINIGAME_TIMEOUT:
+
+            print("[!] Fishing minigame timed out.")
+            return False
+
+        width = find_contiguous_bar_width(
+            bar_color
+        )
+
+        # ----------------------------------------------------
+        # If the colored bar is narrow or missing, click.
+        #
+        # This follows the old macro's advanced detection:
+        # when the detected width falls below the threshold,
+        # the macro clicks.
+        # ----------------------------------------------------
+
+        if width == 0:
+
+            print("Target lost - clicking!")
+
+            native_click()
+
+            time.sleep(0.15)
+
+        elif width < ADVANCED_FISHING_THRESHOLD:
+
+            print(
+                f"Target width: {width} "
+                f"- clicking!"
+            )
+
+            native_click()
+
+            time.sleep(0.15)
+
+        else:
+
+            time.sleep(
+                MINIGAME_SCAN_DELAY
+            )
+
+        # ----------------------------------------------------
+        # Check whether the minigame has disappeared.
+        # ----------------------------------------------------
+
+        if not is_white_pixel(
+            MINIGAME_START_PIXEL[0],
+            MINIGAME_START_PIXEL[1]
+        ):
+
+            # Give the game a moment to transition.
+            time.sleep(0.2)
+
+            print("Fishing minigame finished.")
+
+            return True
 
     return False
 
@@ -210,8 +459,8 @@ def reset_character():
     if not running:
         return
 
-    # Slowly press Escape
     print("Pressing ESC...")
+
     keyboard.press("esc")
     time.sleep(0.5)
     keyboard.release("esc")
@@ -221,8 +470,8 @@ def reset_character():
     if not running:
         return
 
-    # Restart character
     print("Pressing R...")
+
     keyboard.press("r")
     time.sleep(0.5)
     keyboard.release("r")
@@ -233,6 +482,7 @@ def reset_character():
         return
 
     print("Pressing Enter...")
+
     keyboard.press("enter")
     time.sleep(0.5)
     keyboard.release("enter")
@@ -292,7 +542,6 @@ def reset_camera():
     if not running:
         return
 
-    # Zoom all the way in
     print("Zooming in...")
 
     keyboard.press("o")
@@ -304,7 +553,6 @@ def reset_camera():
     if not running:
         return
 
-    # Zoom all the way back out
     print("Zooming out...")
 
     keyboard.press("i")
@@ -326,7 +574,6 @@ def path_to_fish_shop():
     if not running:
         return
 
-    # Move toward the wall
     print("Moving toward wall...")
 
     keyboard.keyDown("w")
@@ -336,13 +583,7 @@ def path_to_fish_shop():
     if not running:
         return
 
-    # Align for jump sequence
     print("Aligning for jump sequence...")
-
-    # Placeholder for the actual path.
-    #
-    # We will replace this with the exact movement sequence
-    # once we test the route in-game.
 
     print("[!] Exact shop path still needs calibration.")
 
@@ -461,135 +702,100 @@ def macro():
 
     while running:
 
-        # ----------------------------------------------------
         # 1. Start fishing
-        # ----------------------------------------------------
-
         if not start_fishing():
             break
 
         if not running:
             break
 
-        # ----------------------------------------------------
-        # 2. Fishing minigame
-        # ----------------------------------------------------
-
+        # 2. Play fishing minigame
         if not play_fishing_minigame():
+
             print()
             print("[STOPPED]")
-            print("Fishing minigame detection needs to be added.")
+            print("Fishing minigame could not be completed.")
+
             running = False
             break
 
         if not running:
             break
 
-        # ----------------------------------------------------
-        # 3. Close Fish Caught popup
-        # ----------------------------------------------------
-
-        close_fish_caught_popup()
+        # 3. Fish Caught popup
+        if FISH_CAUGHT_X is not None:
+            close_fish_caught_popup()
+        else:
+            print("[!] Fish Caught X not calibrated yet.")
 
         fishing_cycles += 1
 
         print()
-        print(f"Fishing cycle: {fishing_cycles}/{MAX_FISHING_CYCLES}")
+        print(
+            f"Fishing cycle: "
+            f"{fishing_cycles}/{MAX_FISHING_CYCLES}"
+        )
 
-        # ----------------------------------------------------
-        # 4. Check whether it's time to sell
-        # ----------------------------------------------------
-
+        # 4. Check whether it is time to sell
         if fishing_cycles >= MAX_FISHING_CYCLES:
 
             print()
             print("Maximum fishing cycles reached.")
 
-            # ------------------------------------------------
             # 5. Reset character
-            # ------------------------------------------------
-
             reset_character()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 6. Open Collections
-            # ------------------------------------------------
-
             open_collections()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 7. Close Collections
-            # ------------------------------------------------
-
             close_collections()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 8. Face beach
-            # ------------------------------------------------
-
             face_beach()
 
-            # ------------------------------------------------
             # 9. Reset camera
-            # ------------------------------------------------
-
             reset_camera()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 10. Walk to fish shop
-            # ------------------------------------------------
-
             path_to_fish_shop()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 11. Open shop
-            # ------------------------------------------------
-
             open_fish_shop()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 12. Sell fish
-            # ------------------------------------------------
-
             sell_fish()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 13. Close shop
-            # ------------------------------------------------
-
             close_fish_shop()
 
             if not running:
                 break
 
-            # ------------------------------------------------
             # 14. Return to beach
-            # ------------------------------------------------
-
             return_to_beach()
 
-            # Start fishing again
             fishing_cycles = 0
 
             print()
@@ -614,6 +820,7 @@ def toggle_macro():
     if running:
 
         running = False
+
         print()
         print("Macro stopped!")
 
