@@ -17,8 +17,8 @@ def macro():
         running = False
         return
 
-    pyautogui.moveTo(*fish_position, duration=0.5)
-    time.sleep(0.3)
+    pyautogui.moveTo(*fish_position, duration=1.0)
+    time.sleep(0.8)
     pyautogui.click()
 
     print("Fish button clicked!")
