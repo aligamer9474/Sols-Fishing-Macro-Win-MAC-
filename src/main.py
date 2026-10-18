@@ -19,14 +19,15 @@ def macro():
 
     print(f"Moving to Fish button: {fish_position}")
 
-    # Move the mouse smoothly, similar to the old AutoHotkey macro
+    # Fast, smooth mouse movement
     pyautogui.moveTo(
         fish_position.x,
         fish_position.y,
-        duration=0.3
+        duration=0.1,
+        tween=pyautogui.linear
     )
 
-    # Give Roblox a moment to recognize the hover
+    # Give Roblox a moment to recognize the cursor
     time.sleep(0.25)
 
     # Click the Fish button
@@ -44,9 +45,7 @@ def save_fish_position():
     fish_position = pyautogui.position()
 
     print()
-    print("================================")
-    print(f"Fish button position saved: {fish_position}")
-    print("================================")
+    print("Fish button position saved:", fish_position)
     print()
 
 
@@ -74,9 +73,9 @@ keyboard.add_hotkey("f3", emergency_stop)
 
 print("Sol's Fishing Macro")
 print()
-print("Hover over the Fish button and press F7.")
-print("Press F8 to start/stop.")
-print("Press F3 for emergency stop.")
+print("F7 = Save Fish button")
+print("F8 = Start / Stop")
+print("F3 = Emergency stop")
 print()
 
 keyboard.wait()
