@@ -1,7 +1,6 @@
 import time
 import threading
 import ctypes
-import pyautogui
 import keyboard
 
 running = False
@@ -11,6 +10,7 @@ fish_position = (853, 832)
 
 user32 = ctypes.windll.user32
 
+MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -29,7 +29,7 @@ def get_mouse_position():
 
 
 def native_move_to(x, y):
-    """Move the mouse gradually using Windows native cursor movement."""
+    """Move using Windows mouse movement events."""
 
     start_x, start_y = get_mouse_position()
 
@@ -41,22 +41,34 @@ def native_move_to(x, y):
     if distance == 0:
         return
 
-    # More steps = smoother movement
+    # Smooth movement
     steps = max(20, int(distance / 8))
 
     for i in range(1, steps + 1):
         if not running:
             return
 
-        new_x = int(
+        target_x = int(
             start_x + (x - start_x) * i / steps
         )
 
-        new_y = int(
+        target_y = int(
             start_y + (y - start_y) * i / steps
         )
 
-        user32.SetCursorPos(new_x, new_y)
+        current_x, current_y = get_mouse_position()
+
+        move_x = target_x - current_x
+        move_y = target_y - current_y
+
+        if move_x != 0 or move_y != 0:
+            user32.mouse_event(
+                MOUSEEVENTF_MOVE,
+                move_x,
+                move_y,
+                0,
+                0
+            )
 
         time.sleep(0.008)
 
@@ -97,7 +109,7 @@ def macro():
     if not running:
         return
 
-    # Give Roblox time to recognize the hover
+    # Pause after movement like the old macro
     time.sleep(0.25)
 
     if not running:
@@ -119,6 +131,7 @@ def toggle_macro():
         print("Macro stopped!")
     else:
         running = True
+
         threading.Thread(
             target=macro,
             daemon=True
