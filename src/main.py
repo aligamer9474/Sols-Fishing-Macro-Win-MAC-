@@ -11,6 +11,9 @@ import pyautogui
 
 FISH_BUTTON = (853, 832)
 
+# Old macro's 1080p fish-result close button
+FISH_RESULT_CLOSE = (1113, 342)
+
 MINIGAME_START_PIXEL = (1176, 836)
 MINIGAME_TIMEOUT = 19
 
@@ -27,9 +30,9 @@ COLOR_TOLERANCE = 10
 
 running = False
 
-# This belongs only to the fishing thread.
-# F3 will NOT erase it while the thread is using it.
 current_bar_color = None
+
+cycle_count = 0
 
 
 # ============================================================
@@ -257,7 +260,6 @@ def wait_for_minigame():
 
 def get_bar_color():
 
-    # Same first sample used by the old macro.
     color = get_pixel(
         955,
         767
@@ -267,7 +269,6 @@ def get_bar_color():
 
         return color
 
-    # Try nearby pixels if the first pixel is white.
     nearby_positions = [
         (954, 767),
         (956, 767),
@@ -292,7 +293,6 @@ def get_bar_color():
 
             return color
 
-    # Last fallback.
     for x in range(
         BAR_LEFT,
         BAR_RIGHT + 1
@@ -333,9 +333,6 @@ def find_bar(bar_color):
     if not running:
         return None
 
-    # Take ONE screenshot of the entire detection row.
-    # This is much faster than calling pyautogui.pixel()
-    # hundreds of times.
     width = (
         BAR_RIGHT
         - BAR_LEFT
@@ -353,7 +350,6 @@ def find_bar(bar_color):
 
     left_x = None
 
-    # Find the first matching pixel.
     for i in range(width):
 
         if not running:
@@ -379,7 +375,6 @@ def find_bar(bar_color):
 
         return None
 
-    # Expand to the right just like the old macro.
     right_x = left_x
 
     while True:
@@ -439,7 +434,6 @@ def play_fishing_minigame():
     print("CLICKS ENABLED")
     print("======================================")
 
-    # Move mouse into the fishing area.
     native_move_to(
         950,
         880
@@ -448,7 +442,6 @@ def play_fishing_minigame():
     if not running:
         return False
 
-    # Same 50ms delay as old macro.
     time.sleep(
         COLOR_SAMPLE_DELAY
     )
@@ -483,8 +476,6 @@ def play_fishing_minigame():
 
     last_click_time = 0
 
-    # Old macro effectively watches the minigame
-    # for around 9 seconds.
     while (
         time.time() - start_time
         < 9.0
@@ -499,9 +490,6 @@ def play_fishing_minigame():
 
         if result is None:
 
-            # Same fallback behavior as the old macro:
-            # if the bar color cannot be found,
-            # click.
             now = time.time()
 
             if (
@@ -534,11 +522,6 @@ def play_fishing_minigame():
             end=""
         )
 
-        # Old macro:
-        #
-        # if barWidth < advancedFishingThreshold
-        #     click
-        #
         if (
             bar_width
             < ADVANCED_FISHING_THRESHOLD
@@ -580,8 +563,6 @@ def play_fishing_minigame():
         f"Clicks: {click_count}"
     )
 
-    # Forget the color ONLY after the fishing
-    # thread is finished using it.
     current_bar_color = None
 
     print(
@@ -592,13 +573,68 @@ def play_fishing_minigame():
 
 
 # ============================================================
-# TEST FISHING
+# CLOSE FISH RESULT
 # ============================================================
 
-def test_fishing():
+def close_fish_result():
 
     print()
-    print("Moving to Fish button...")
+    print("Closing fish result...")
+
+    # Same basic timing as the old macro.
+    time.sleep(0.30)
+
+    if not running:
+        return False
+
+    print(
+        f"Moving to result X: "
+        f"{FISH_RESULT_CLOSE}"
+    )
+
+    native_move_to(
+        FISH_RESULT_CLOSE[0],
+        FISH_RESULT_CLOSE[1]
+    )
+
+    if not running:
+        return False
+
+    # Old macro waits before clicking.
+    time.sleep(0.70)
+
+    if not running:
+        return False
+
+    native_click()
+
+    print(
+        "Fish result closed."
+    )
+
+    time.sleep(0.30)
+
+    return True
+
+
+# ============================================================
+# ONE FISHING CYCLE
+# ============================================================
+
+def fishing_cycle():
+
+    global cycle_count
+
+    print()
+    print("======================================")
+    print(
+        f"FISHING CYCLE #{cycle_count + 1}"
+    )
+    print("======================================")
+
+    print(
+        "Moving to Fish button..."
+    )
 
     click_position(
         FISH_BUTTON[0],
@@ -606,7 +642,7 @@ def test_fishing():
     )
 
     if not running:
-        return
+        return False
 
     if not wait_for_minigame():
 
@@ -614,12 +650,66 @@ def test_fishing():
             "No minigame detected."
         )
 
-        return
+        return False
 
     if not running:
-        return
+        return False
 
-    play_fishing_minigame()
+    caught = play_fishing_minigame()
+
+    if not caught:
+        return False
+
+    if not running:
+        return False
+
+    if not close_fish_result():
+        return False
+
+    cycle_count += 1
+
+    print()
+    print(
+        f"Cycle complete! "
+        f"Total cycles: {cycle_count}"
+    )
+
+    return True
+
+
+# ============================================================
+# MAIN MACRO LOOP
+# ============================================================
+
+def run_macro():
+
+    while running:
+
+        success = fishing_cycle()
+
+        if not success:
+
+            if running:
+
+                print()
+                print(
+                    "Fishing cycle failed."
+                )
+
+                print(
+                    "Stopping macro for now."
+                )
+
+                break
+
+            break
+
+        if not running:
+            break
+
+        # Small pause before starting
+        # the next fishing cycle.
+        time.sleep(0.30)
 
 
 # ============================================================
@@ -629,6 +719,7 @@ def test_fishing():
 def toggle_macro():
 
     global running
+    global cycle_count
 
     if running:
 
@@ -641,11 +732,13 @@ def toggle_macro():
 
     running = True
 
+    cycle_count = 0
+
     print()
     print("Macro STARTED.")
 
     threading.Thread(
-        target=test_fishing,
+        target=run_macro,
         daemon=True
     ).start()
 
@@ -654,11 +747,6 @@ def emergency_stop():
 
     global running
 
-    # IMPORTANT:
-    # Do NOT erase current_bar_color here.
-    #
-    # The fishing thread might currently be reading it.
-    # The fishing thread will safely erase it when it exits.
     running = False
 
     print()
@@ -687,7 +775,7 @@ print("======================================")
 print("F8 = Start")
 print("F3 = Emergency Stop")
 print()
-print("Using old macro fishing detection.")
+print("Fishing + fish-result loop enabled.")
 print("Advanced threshold: 25 pixels")
 print("======================================")
 
