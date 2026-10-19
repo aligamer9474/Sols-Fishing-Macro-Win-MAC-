@@ -14,13 +14,13 @@ FISH_BUTTON = (853, 832)
 MINIGAME_START_PIXEL = (1176, 836)
 MINIGAME_TIMEOUT = 19
 
-# Fishing bar
+# Fishing bar region
 BAR_LEFT = 757
 BAR_TOP = 762
 BAR_WIDTH = 405
 BAR_HEIGHT = 21
 
-SCAN_DELAY = 0.10
+SCAN_DELAY = 0.08
 
 running = False
 
@@ -169,16 +169,32 @@ def wait_for_minigame():
 
 
 # ============================================================
-# FIND WHITE TARGET
+# SCREENSHOT
+# ============================================================
+
+def get_bar_image():
+
+    return pyautogui.screenshot(
+        region=(
+            BAR_LEFT,
+            BAR_TOP,
+            BAR_WIDTH,
+            BAR_HEIGHT
+        )
+    )
+
+
+# ============================================================
+# WHITE TARGET
 # ============================================================
 
 def find_white_target(image):
 
-    white_columns = []
+    columns = []
 
     for x in range(BAR_WIDTH):
 
-        white_count = 0
+        white_pixels = 0
 
         for y in range(BAR_HEIGHT):
 
@@ -189,20 +205,20 @@ def find_white_target(image):
                 and g >= 245
                 and b >= 245
             ):
-                white_count += 1
+                white_pixels += 1
 
-        if white_count >= 2:
-            white_columns.append(x)
+        if white_pixels >= 2:
+            columns.append(x)
 
-    if not white_columns:
+    if not columns:
         return None
 
     groups = []
 
-    start = white_columns[0]
-    previous = white_columns[0]
+    start = columns[0]
+    previous = columns[0]
 
-    for x in white_columns[1:]:
+    for x in columns[1:]:
 
         if x <= previous + 2:
             previous = x
@@ -220,8 +236,17 @@ def find_white_target(image):
         (start, previous)
     )
 
-    # The target is normally one of the larger
-    # white sections.
+    # Remove extremely tiny groups
+    groups = [
+        group
+        for group in groups
+        if group[1] - group[0] >= 4
+    ]
+
+    if not groups:
+        return None
+
+    # The target is normally the widest white area
     groups.sort(
         key=lambda group:
         group[1] - group[0],
@@ -240,50 +265,76 @@ def find_white_target(image):
 
 
 # ============================================================
-# FIND CHANGED AREA
+# BUILD A BRIGHTNESS MAP
 # ============================================================
 
-def find_changed_area(previous, current):
+def get_column_brightness(image):
 
-    changed_columns = []
+    brightness = []
 
     for x in range(BAR_WIDTH):
 
-        changed_pixels = 0
+        total = 0
 
         for y in range(BAR_HEIGHT):
 
-            old_pixel = previous.getpixel(
-                (x, y)
-            )
+            r, g, b = image.getpixel((x, y))
 
-            new_pixel = current.getpixel(
-                (x, y)
-            )
+            total += r + g + b
 
-            difference = (
-                abs(old_pixel[0] - new_pixel[0])
-                +
-                abs(old_pixel[1] - new_pixel[1])
-                +
-                abs(old_pixel[2] - new_pixel[2])
-            )
+        average = total / (BAR_HEIGHT * 3)
 
-            if difference >= 30:
-                changed_pixels += 1
+        brightness.append(average)
 
-        if changed_pixels >= 3:
-            changed_columns.append(x)
+    return brightness
 
-    if not changed_columns:
+
+# ============================================================
+# FIND RECTANGLE SHAPE
+# ============================================================
+
+def find_rectangle_shape(previous, current, target):
+
+    if previous is None:
         return None
 
+    old_brightness = get_column_brightness(
+        previous
+    )
+
+    new_brightness = get_column_brightness(
+        current
+    )
+
+    differences = []
+
+    for x in range(BAR_WIDTH):
+
+        difference = abs(
+            new_brightness[x]
+            - old_brightness[x]
+        )
+
+        differences.append(difference)
+
+    # Find columns that changed significantly
+    changed = []
+
+    for x in range(BAR_WIDTH):
+
+        if differences[x] >= 12:
+            changed.append(x)
+
+    if not changed:
+        return None
+
+    # Group nearby changed columns
     groups = []
 
-    start = changed_columns[0]
-    previous_x = changed_columns[0]
+    start = changed[0]
+    previous_x = changed[0]
 
-    for x in changed_columns[1:]:
+    for x in changed[1:]:
 
         if x <= previous_x + 2:
 
@@ -302,22 +353,40 @@ def find_changed_area(previous, current):
         (start, previous_x)
     )
 
-    # Remove tiny noise
+    # Remove tiny changes
     groups = [
         group
         for group in groups
-        if group[1] - group[0] >= 4
+        if 4 <= group[1] - group[0] <= 70
     ]
 
     if not groups:
         return None
 
-    # Largest changed section
-    groups.sort(
-        key=lambda group:
-        group[1] - group[0],
-        reverse=True
-    )
+    # If there is a target, prefer movement
+    # closest to it or around the central game area.
+    if target is not None:
+
+        target_center = target[2]
+
+        groups.sort(
+            key=lambda group:
+            abs(
+                (
+                    BAR_LEFT
+                    + (group[0] + group[1]) // 2
+                )
+                - target_center
+            )
+        )
+
+    else:
+
+        groups.sort(
+            key=lambda group:
+            group[1] - group[0],
+            reverse=True
+        )
 
     left, right = groups[0]
 
@@ -331,45 +400,51 @@ def find_changed_area(previous, current):
 
 
 # ============================================================
-# FIND RECTANGLE
+# FIND RECTANGLE USING MULTIPLE FRAMES
 # ============================================================
 
-def find_rectangle(previous, current, target):
+def stabilize_rectangle(history, target):
 
-    movement = find_changed_area(
-        previous,
-        current
-    )
-
-    if movement is None:
+    if not history:
         return None
 
-    left, right, center = movement
+    candidates = []
 
-    # If the detected movement is extremely large,
-    # it is probably the UI/background changing
-    # rather than the rectangle.
-    width = right - left
+    for rectangle in history:
 
-    if width > 100:
-        return None
+        if rectangle is None:
+            continue
 
-    # If we have a target, avoid treating the target
-    # itself as the rectangle.
-    if target is not None:
+        center = rectangle[2]
 
-        target_left = target[0]
-        target_right = target[1]
+        # Ignore obviously huge/full-bar detections
+        width = rectangle[1] - rectangle[0]
 
-        overlap = (
-            left <= target_right
-            and right >= target_left
+        if width > 70:
+            continue
+
+        candidates.append(
+            (
+                center,
+                rectangle
+            )
         )
 
-        if overlap and width > 35:
-            return None
+    if not candidates:
+        return None
 
-    return movement
+    # If target exists, favor candidates that appear
+    # near the target rather than random full-bar changes.
+    if target is not None:
+
+        target_center = target[2]
+
+        candidates.sort(
+            key=lambda item:
+            abs(item[0] - target_center)
+        )
+
+    return candidates[0][1]
 
 
 # ============================================================
@@ -380,73 +455,60 @@ def track_minigame():
 
     print()
     print("======================================")
-    print("TRACKER STARTED")
+    print("SHAPE TRACKER STARTED")
     print("NO MINIGAME CLICKS")
     print("======================================")
     print()
 
     previous_image = None
 
-    last_rectangle = None
+    rectangle_history = []
 
     start_time = time.time()
 
     while time.time() - start_time < 8:
 
-        current_image = pyautogui.screenshot(
-            region=(
-                BAR_LEFT,
-                BAR_TOP,
-                BAR_WIDTH,
-                BAR_HEIGHT
-            )
-        )
+        current_image = get_bar_image()
 
         target = find_white_target(
             current_image
         )
 
-        rectangle = None
+        rectangle = find_rectangle_shape(
+            previous_image,
+            current_image,
+            target
+        )
 
-        if previous_image is not None:
+        rectangle_history.append(
+            rectangle
+        )
 
-            rectangle = find_rectangle(
-                previous_image,
-                current_image,
-                target
-            )
+        # Keep only recent detections
+        if len(rectangle_history) > 5:
+            rectangle_history.pop(0)
 
-        # Keep the last known rectangle if the
-        # current frame has no usable detection.
-        if rectangle is not None:
-            last_rectangle = rectangle
+        best_rectangle = stabilize_rectangle(
+            rectangle_history,
+            target
+        )
 
-        if rectangle is not None:
-
-            rectangle_center = rectangle[2]
-
-        elif last_rectangle is not None:
-
-            rectangle_center = last_rectangle[2]
-
-        else:
-
-            rectangle_center = None
-
-        # Target center
         if target is not None:
             target_center = target[2]
         else:
             target_center = None
 
-        # Distance between rectangle and target
+        if best_rectangle is not None:
+            rectangle_center = best_rectangle[2]
+        else:
+            rectangle_center = None
+
         distance = None
 
         if (
             rectangle_center is not None
             and target_center is not None
         ):
-
             distance = (
                 rectangle_center
                 - target_center
@@ -457,8 +519,7 @@ def track_minigame():
         print(
             f"[{elapsed:4.1f}s] "
             f"Target={target} | "
-            f"Movement={rectangle} | "
-            f"RectangleCenter={rectangle_center} | "
+            f"Rectangle={best_rectangle} | "
             f"Distance={distance}"
         )
 
@@ -468,7 +529,7 @@ def track_minigame():
 
     print()
     print("======================================")
-    print("TRACKER FINISHED")
+    print("SHAPE TRACKER FINISHED")
     print("======================================")
 
 
@@ -550,7 +611,7 @@ print("======================================")
 print("F8 = Start")
 print("F3 = Emergency Stop")
 print()
-print("This version DOES NOT click")
+print("This version DOES NOT CLICK")
 print("during the minigame.")
 print("======================================")
 
