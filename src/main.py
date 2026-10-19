@@ -18,19 +18,18 @@ BAR_LEFT = 757
 BAR_RIGHT = 1161
 BAR_Y = 767
 
-# Same threshold used by the old macro
 ADVANCED_FISHING_THRESHOLD = 25
 
-# Old macro waits 50ms before getting the bar color
 COLOR_SAMPLE_DELAY = 0.050
-
-# Old macro loops around every 10ms
 SCAN_DELAY = 0.010
 
-# Same basic RGB tolerance used by old macro
 COLOR_TOLERANCE = 10
 
 running = False
+
+# This belongs only to the fishing thread.
+# F3 will NOT erase it while the thread is using it.
+current_bar_color = None
 
 
 # ============================================================
@@ -81,6 +80,9 @@ def native_move_to(x, y):
 
     for i in range(1, steps + 1):
 
+        if not running:
+            return
+
         target_x = (
             start_x
             + int(dx * i / steps)
@@ -113,6 +115,9 @@ def native_move_to(x, y):
 
 def native_click():
 
+    if not running:
+        return
+
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -135,6 +140,9 @@ def native_click():
 def click_position(x, y):
 
     native_move_to(x, y)
+
+    if not running:
+        return
 
     time.sleep(0.25)
 
@@ -167,6 +175,9 @@ def is_white(color):
 
 
 def colors_match(color1, color2):
+
+    if color1 is None or color2 is None:
+        return False
 
     return (
         abs(color1[0] - color2[0])
@@ -241,35 +252,22 @@ def wait_for_minigame():
 
 
 # ============================================================
-# GET RANDOMIZED BAR COLOR
+# GET BAR COLOR
 # ============================================================
 
 def get_bar_color():
 
-    # --------------------------------------------------------
-    # This is the exact point used by the old macro:
-    #
-    # PixelGetColor, barColor, 955, 767, RGB
-    #
-    # --------------------------------------------------------
-
+    # Same first sample used by the old macro.
     color = get_pixel(
         955,
         767
     )
 
-    # If it isn't white, use it immediately.
     if not is_white(color):
 
         return color
 
-    # --------------------------------------------------------
-    # Python can occasionally catch the white target at the
-    # exact instant the old macro would have caught the bar.
-    #
-    # Try nearby pixels instead.
-    # --------------------------------------------------------
-
+    # Try nearby pixels if the first pixel is white.
     nearby_positions = [
         (954, 767),
         (956, 767),
@@ -294,15 +292,14 @@ def get_bar_color():
 
             return color
 
-    # --------------------------------------------------------
-    # Last fallback:
-    # scan the whole bar for the first useful color.
-    # --------------------------------------------------------
-
+    # Last fallback.
     for x in range(
         BAR_LEFT,
         BAR_RIGHT + 1
     ):
+
+        if not running:
+            return None
 
         color = get_pixel(
             x,
@@ -313,7 +310,6 @@ def get_bar_color():
 
             r, g, b = color
 
-            # Avoid nearly-black background pixels
             if (
                 r > 10
                 or g > 10
@@ -326,71 +322,88 @@ def get_bar_color():
 
 
 # ============================================================
-# FIND BAR WIDTH
+# FIND BAR
 # ============================================================
 
-def find_bar():
+def find_bar(bar_color):
 
-    # --------------------------------------------------------
-    # Same idea as:
-    #
-    # PixelSearch, leftX, leftY,
-    # 757, 767, 1161, 767,
-    # barColor, 5, Fast RGB
-    # --------------------------------------------------------
+    if bar_color is None:
+        return None
+
+    if not running:
+        return None
+
+    # Take ONE screenshot of the entire detection row.
+    # This is much faster than calling pyautogui.pixel()
+    # hundreds of times.
+    width = (
+        BAR_RIGHT
+        - BAR_LEFT
+        + 1
+    )
+
+    screenshot = pyautogui.screenshot(
+        region=(
+            BAR_LEFT,
+            BAR_Y,
+            width,
+            1
+        )
+    )
 
     left_x = None
 
-    for x in range(
-        BAR_LEFT,
-        BAR_RIGHT + 1
-    ):
+    # Find the first matching pixel.
+    for i in range(width):
 
-        color = get_pixel(
-            x,
-            BAR_Y
+        if not running:
+            return None
+
+        color = screenshot.getpixel(
+            (i, 0)
         )
 
         if colors_match(
             color,
-            current_bar_color
+            bar_color
         ):
 
-            left_x = x
+            left_x = (
+                BAR_LEFT
+                + i
+            )
 
             break
-
-    # --------------------------------------------------------
-    # Old macro: if PixelSearch failed,
-    # immediately click.
-    # --------------------------------------------------------
 
     if left_x is None:
 
         return None
 
-    # --------------------------------------------------------
-    # Expand right exactly like the old macro.
-    # --------------------------------------------------------
-
+    # Expand to the right just like the old macro.
     right_x = left_x
 
     while True:
 
-        test_x = right_x + 1
+        test_x = (
+            right_x
+            + 1
+        )
 
         if test_x > BAR_RIGHT:
-
             break
 
-        test_color = get_pixel(
-            test_x,
-            BAR_Y
+        pixel_x = (
+            test_x
+            - BAR_LEFT
+        )
+
+        test_color = screenshot.getpixel(
+            (pixel_x, 0)
         )
 
         if colors_match(
             test_color,
-            current_bar_color
+            bar_color
         ):
 
             right_x = test_x
@@ -415,9 +428,6 @@ def find_bar():
 # FISHING MINIGAME
 # ============================================================
 
-current_bar_color = None
-
-
 def play_fishing_minigame():
 
     global current_bar_color
@@ -429,22 +439,22 @@ def play_fishing_minigame():
     print("CLICKS ENABLED")
     print("======================================")
 
-    # --------------------------------------------------------
-    # Old macro moves mouse to 950,880 and waits 50ms.
-    # --------------------------------------------------------
-
+    # Move mouse into the fishing area.
     native_move_to(
         950,
         880
     )
 
+    if not running:
+        return False
+
+    # Same 50ms delay as old macro.
     time.sleep(
         COLOR_SAMPLE_DELAY
     )
 
-    # --------------------------------------------------------
-    # Get randomized bar color.
-    # --------------------------------------------------------
+    if not running:
+        return False
 
     current_bar_color = get_bar_color()
 
@@ -471,43 +481,47 @@ def play_fishing_minigame():
 
     click_count = 0
 
-    last_click = 0
+    last_click_time = 0
 
-    # --------------------------------------------------------
-    # Old macro's detection loop runs for about 9 seconds.
-    # --------------------------------------------------------
-
+    # Old macro effectively watches the minigame
+    # for around 9 seconds.
     while (
         time.time() - start_time
         < 9.0
     ):
 
         if not running:
+            break
 
-            current_bar_color = None
-
-            return False
-
-        result = find_bar()
-
-        # ----------------------------------------------------
-        # If the old PixelSearch cannot find the color,
-        # the old macro clicks.
-        # ----------------------------------------------------
+        result = find_bar(
+            current_bar_color
+        )
 
         if result is None:
 
-            native_click()
+            # Same fallback behavior as the old macro:
+            # if the bar color cannot be found,
+            # click.
+            now = time.time()
 
-            click_count += 1
+            if (
+                now - last_click_time
+                >= 0.025
+            ):
 
-            print(
-                f"CLICK #{click_count} "
-                f"| Bar color not found"
-            )
+                native_click()
+
+                click_count += 1
+
+                last_click_time = now
+
+                print(
+                    f"CLICK #{click_count} "
+                    f"| Bar color not found"
+                )
 
             time.sleep(
-                0.025
+                SCAN_DELAY
             )
 
             continue
@@ -520,32 +534,40 @@ def play_fishing_minigame():
             end=""
         )
 
-        # ----------------------------------------------------
-        # EXACT OLD MACRO THRESHOLD:
+        # Old macro:
         #
-        # if (barWidth < advancedFishingThreshold)
-        #     MouseClick, left
+        # if barWidth < advancedFishingThreshold
+        #     click
         #
-        # Default threshold = 25.
-        # ----------------------------------------------------
+        if (
+            bar_width
+            < ADVANCED_FISHING_THRESHOLD
+        ):
 
-        if bar_width < ADVANCED_FISHING_THRESHOLD:
+            now = time.time()
 
-            native_click()
+            if (
+                now - last_click_time
+                >= 0.025
+            ):
 
-            click_count += 1
+                native_click()
 
-            print()
+                click_count += 1
 
-            print(
-                f"CLICK #{click_count} "
-                f"| X={left_x}-{right_x} "
-                f"| Width={bar_width}"
-            )
+                last_click_time = now
 
-            time.sleep(
-                0.025
-            )
+                print()
+
+                print(
+                    f"CLICK #{click_count} "
+                    f"| X={left_x}-{right_x} "
+                    f"| Width={bar_width}"
+                )
+
+                time.sleep(
+                    0.025
+                )
 
         time.sleep(
             SCAN_DELAY
@@ -558,10 +580,8 @@ def play_fishing_minigame():
         f"Clicks: {click_count}"
     )
 
-    # --------------------------------------------------------
-    # Forget the color after this fish.
-    # --------------------------------------------------------
-
+    # Forget the color ONLY after the fishing
+    # thread is finished using it.
     current_bar_color = None
 
     print(
@@ -585,12 +605,18 @@ def test_fishing():
         FISH_BUTTON[1]
     )
 
+    if not running:
+        return
+
     if not wait_for_minigame():
 
         print(
             "No minigame detected."
         )
 
+        return
+
+    if not running:
         return
 
     play_fishing_minigame()
@@ -627,11 +653,13 @@ def toggle_macro():
 def emergency_stop():
 
     global running
-    global current_bar_color
 
+    # IMPORTANT:
+    # Do NOT erase current_bar_color here.
+    #
+    # The fishing thread might currently be reading it.
+    # The fishing thread will safely erase it when it exits.
     running = False
-
-    current_bar_color = None
 
     print()
     print("======================================")
