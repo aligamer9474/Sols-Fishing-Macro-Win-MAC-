@@ -27,12 +27,13 @@ SCAN_DELAY = 0.010
 
 COLOR_TOLERANCE = 10
 
-# Prevents repeated clicks from happening too quickly.
+# Normal fishing click cooldown.
 VISIBLE_CLICK_COOLDOWN = 0.100
 
-# Controlled fallback clicking when the learned color
-# temporarily disappears.
-MISSING_COLOR_CLICK_COOLDOWN = 0.150
+# IMPORTANT:
+# If the bar color disappears, the macro is allowed
+# to "panic click" only ONCE every 0.8 seconds.
+MISSING_COLOR_CLICK_COOLDOWN = 0.800
 
 running = False
 
@@ -482,7 +483,6 @@ def play_fishing_minigame():
 
     last_click_time = 0
 
-    # Used only for cleaner logging.
     was_missing = False
 
     while (
@@ -505,12 +505,10 @@ def play_fishing_minigame():
 
             now = time.time()
 
-            # The old macro clicks when the learned
-            # color cannot be found.
+            # PANIC MODE
             #
-            # We keep that behavior, but slow it
-            # down enough to prevent machine-gun
-            # clicking.
+            # The bar is hidden, so we do NOT spam.
+            # We only click once every 0.8 seconds.
 
             if (
                 now - last_click_time
@@ -524,13 +522,11 @@ def play_fishing_minigame():
                 last_click_time = now
 
                 print(
-                    f"CLICK #{click_count} "
-                    f"| Bar color not found"
+                    f"PANIC CLICK #{click_count} "
+                    f"| Color not found"
                 )
 
-            if not was_missing:
-
-                was_missing = True
+            was_missing = True
 
             time.sleep(
                 SCAN_DELAY
@@ -552,10 +548,10 @@ def play_fishing_minigame():
 
         left_x, right_x, bar_width = result
 
+        # Print the current bar cleanly.
         print(
-            f"\rBar X={left_x}-{right_x} "
-            f"Width={bar_width}",
-            end=""
+            f"Bar X={left_x}-{right_x} "
+            f"Width={bar_width}"
         )
 
         # ====================================================
@@ -579,8 +575,6 @@ def play_fishing_minigame():
                 click_count += 1
 
                 last_click_time = now
-
-                print()
 
                 print(
                     f"CLICK #{click_count} "
@@ -807,7 +801,7 @@ print("F3 = Emergency Stop")
 print()
 print("Fishing + fish-result loop enabled.")
 print("Advanced threshold: 25 pixels")
-print("Controlled missing-color fallback: 150ms")
+print("Panic click cooldown: 0.8 seconds")
 print("======================================")
 
 keyboard.wait()
