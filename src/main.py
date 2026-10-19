@@ -22,17 +22,12 @@ ADVANCED_FISHING_THRESHOLD = 25
 
 COLOR_SAMPLE_DELAY = 0.050
 SCAN_DELAY = 0.010
-
 COLOR_TOLERANCE = 10
 
-# Normal clicking
 REARM_DELAY = 0.08
-
-# Panic clicking when the rectangle is hidden
 MISSING_COLOR_COOLDOWN = 0.60
-
-# Prevent clicking the exact same danger zone repeatedly
 SAME_POSITION_COOLDOWN = 0.25
+
 
 # ============================================================
 # GLOBAL STATE
@@ -57,36 +52,68 @@ MOUSEEVENTF_LEFTUP = 0x0004
 
 
 def native_move_to(target_x, target_y, steps=30):
-    current_x, current_y = pyautogui.position()
+    """
+    Move using small RELATIVE Windows mouse movements.
 
-    dx = target_x - current_x
-    dy = target_y - current_y
+    This is the version that previously worked correctly
+    with Roblox.
+    """
+
+    start_x, start_y = pyautogui.position()
+
+    total_dx = target_x - start_x
+    total_dy = target_y - start_y
+
+    previous_x = 0
+    previous_y = 0
 
     for i in range(1, steps + 1):
+
         if emergency_stop:
             return
 
-        move_x = int(dx * i / steps)
-        move_y = int(dy * i / steps)
+        current_x = round(total_dx * i / steps)
+        current_y = round(total_dy * i / steps)
+
+        move_x = current_x - previous_x
+        move_y = current_y - previous_y
 
         user32.mouse_event(
             MOUSEEVENTF_MOVE,
-            move_x - int(dx * (i - 1) / steps),
-            move_y - int(dy * (i - 1) / steps),
+            move_x,
+            move_y,
             0,
             0
         )
+
+        previous_x = current_x
+        previous_y = current_y
 
         time.sleep(0.003)
 
 
 def native_click():
+
     if emergency_stop:
         return
 
-    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTDOWN,
+        0,
+        0,
+        0,
+        0
+    )
+
     time.sleep(0.02)
-    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        0
+    )
 
 
 # ============================================================
@@ -94,6 +121,7 @@ def native_click():
 # ============================================================
 
 def colors_match(c1, c2, tolerance=COLOR_TOLERANCE):
+
     if c1 is None or c2 is None:
         return False
 
@@ -105,25 +133,21 @@ def colors_match(c1, c2, tolerance=COLOR_TOLERANCE):
 
 
 def get_bar_color():
-    """
-    Same basic method as the old macro:
-    sample the fishing bar around X=955, Y=767.
-    """
 
     screenshot = pyautogui.screenshot()
 
-    # First try the original sampling point.
+    # Original sampling location
     color = screenshot.getpixel((955, BAR_Y))
 
-    # If it looks usable, use it.
     if (
         color != (255, 255, 255)
         and color[0] + color[1] + color[2] > 40
     ):
         return color
 
-    # Try nearby pixels.
+    # Nearby fallback
     for x in range(950, 961):
+
         color = screenshot.getpixel((x, BAR_Y))
 
         if (
@@ -132,9 +156,9 @@ def get_bar_color():
         ):
             return color
 
-    # Final fallback:
-    # scan the fishing bar for a usable colored pixel.
+    # Full bar fallback
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
+
         color = screenshot.getpixel((x, BAR_Y))
 
         if (
@@ -147,13 +171,6 @@ def get_bar_color():
 
 
 def find_bar(bar_color):
-    """
-    Find the contiguous rectangle matching the learned color.
-    Returns:
-        (left_x, right_x, width)
-    or:
-        None
-    """
 
     if bar_color is None:
         return None
@@ -163,6 +180,7 @@ def find_bar(bar_color):
     matches = []
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
+
         pixel = screenshot.getpixel((x, BAR_Y))
 
         if colors_match(pixel, bar_color):
@@ -171,7 +189,6 @@ def find_bar(bar_color):
     if not matches:
         return None
 
-    # Find the longest contiguous section.
     best_start = None
     best_end = None
 
@@ -179,9 +196,12 @@ def find_bar(bar_color):
     current_end = matches[0]
 
     for x in matches[1:]:
+
         if x <= current_end + 1:
             current_end = x
+
         else:
+
             if (
                 best_start is None
                 or current_end - current_start
@@ -207,10 +227,11 @@ def find_bar(bar_color):
 
 
 # ============================================================
-# MINIGAME DETECTION
+# WAIT FOR MINIGAME
 # ============================================================
 
 def wait_for_minigame():
+
     print()
     print("Waiting for minigame...")
 
@@ -233,7 +254,6 @@ def wait_for_minigame():
         except:
             pixel = (0, 0, 0)
 
-        # Old macro waits for the white indicator.
         if (
             pixel[0] > 240
             and pixel[1] > 240
@@ -258,6 +278,7 @@ def wait_for_minigame():
 # ============================================================
 
 def play_fishing_minigame():
+
     global current_bar_color
 
     print()
@@ -267,8 +288,9 @@ def play_fishing_minigame():
     print("CLICKS ENABLED")
     print("======================================")
 
-    # Same positioning used by the old macro.
+    # Keep the same positioning that worked before.
     native_move_to(950, 880)
+
     time.sleep(COLOR_SAMPLE_DELAY)
 
     current_bar_color = get_bar_color()
@@ -287,21 +309,11 @@ def play_fishing_minigame():
 
     clicks = 0
 
-    # --------------------------------------------------------
-    # NORMAL STATE
-    # --------------------------------------------------------
-
     danger_locked = False
 
-    # Used to prevent repeatedly clicking the exact same
-    # stationary rectangle.
     last_click_left = None
     last_click_right = None
     last_normal_click = 0
-
-    # --------------------------------------------------------
-    # PANIC STATE
-    # --------------------------------------------------------
 
     panic_mode = False
     last_panic_click = 0
@@ -314,23 +326,22 @@ def play_fishing_minigame():
         result = find_bar(current_bar_color)
 
         # ====================================================
-        # RECTANGLE IS NOT CURRENTLY VISIBLE
+        # COLOR HIDDEN
         # ====================================================
 
         if result is None:
 
-            # Only enter panic mode if we previously had
-            # a visible rectangle.
             if last_click_left is not None:
                 panic_mode = True
 
-            # Panic clicking is ONLY allowed while panic mode
-            # is active.
             if panic_mode:
 
                 now = time.time()
 
-                if now - last_panic_click >= MISSING_COLOR_COOLDOWN:
+                if (
+                    now - last_panic_click
+                    >= MISSING_COLOR_COOLDOWN
+                ):
 
                     native_click()
 
@@ -346,15 +357,17 @@ def play_fishing_minigame():
             continue
 
         # ====================================================
-        # RECTANGLE IS BACK
+        # COLOR FOUND AGAIN
         # ====================================================
 
-        # THIS IS THE IMPORTANT FIX:
-        # The moment the rectangle is detected again,
-        # panic mode is completely disabled.
         if panic_mode:
+
             panic_mode = False
-            print("Rectangle detected again - panic mode OFF.")
+
+            print(
+                "Rectangle detected again - "
+                "panic mode OFF."
+            )
 
         left_x, right_x, width = result
 
@@ -370,11 +383,8 @@ def play_fishing_minigame():
 
         if width < ADVANCED_FISHING_THRESHOLD:
 
-            # Only click once when entering the danger zone.
             if not danger_locked:
 
-                # Prevent rapid repeated clicks at the same
-                # exact location.
                 same_position = (
                     left_x == last_click_left
                     and right_x == last_click_right
@@ -408,8 +418,6 @@ def play_fishing_minigame():
 
         else:
 
-            # Once the rectangle gets back above the threshold,
-            # re-arm the detector.
             if danger_locked:
                 time.sleep(REARM_DELAY)
 
@@ -448,6 +456,7 @@ def close_fish_result():
     )
 
     time.sleep(0.10)
+
     native_click()
 
     print("Fish result closed.")
@@ -456,7 +465,7 @@ def close_fish_result():
 
 
 # ============================================================
-# ONE FISHING CYCLE
+# FISHING CYCLE
 # ============================================================
 
 def fishing_cycle(cycle_number):
@@ -505,7 +514,7 @@ def fishing_cycle(cycle_number):
 
 
 # ============================================================
-# MAIN MACRO LOOP
+# MAIN LOOP
 # ============================================================
 
 def macro_loop():
@@ -530,7 +539,7 @@ def macro_loop():
 
 
 # ============================================================
-# F8 START / STOP
+# F8
 # ============================================================
 
 def toggle_macro():
@@ -563,7 +572,7 @@ def toggle_macro():
 
 
 # ============================================================
-# F3 EMERGENCY STOP
+# F3
 # ============================================================
 
 def emergency():
@@ -603,8 +612,10 @@ keyboard.add_hotkey("f8", toggle_macro)
 keyboard.add_hotkey("f3", emergency)
 
 try:
+
     while True:
         time.sleep(0.1)
 
 except KeyboardInterrupt:
+
     emergency()
