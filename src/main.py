@@ -18,17 +18,18 @@ BAR_LEFT = 757
 BAR_RIGHT = 1161
 BAR_Y = 767
 
-SCAN_DELAY = 0.008
+# How long we spend learning the color
+COLOR_LEARNING_TIME = 2.0
 
-# How different a pixel must be from the background
-COLOR_DIFFERENCE = 25
+# How similar a pixel must be to the learned color
+COLOR_TOLERANCE = 12
 
-# Minimum number of pixels needed to count as a section
-MIN_SECTION_WIDTH = 3
+# AHK used 25 as the advanced detection threshold
+CLICK_WIDTH = 25
 
-# Fishing timing
-TARGET_DISTANCE = 8
 CLICK_COOLDOWN = 0.025
+
+SCAN_DELAY = 0.006
 
 running = False
 
@@ -52,6 +53,7 @@ class POINT(ctypes.Structure):
 
 
 def get_mouse_position():
+
     point = POINT()
 
     user32.GetCursorPos(
@@ -165,12 +167,14 @@ def is_white(color):
     )
 
 
-def color_difference(color1, color2):
+def color_close(color1, color2):
 
     return (
-        abs(color1[0] - color2[0])
-        + abs(color1[1] - color2[1])
-        + abs(color1[2] - color2[2])
+        abs(color1[0] - color2[0]) <= COLOR_TOLERANCE
+        and
+        abs(color1[1] - color2[1]) <= COLOR_TOLERANCE
+        and
+        abs(color1[2] - color2[2]) <= COLOR_TOLERANCE
     )
 
 
@@ -232,10 +236,10 @@ def wait_for_minigame():
 
 
 # ============================================================
-# FIND COLORED SECTIONS
+# GET BAR COLORS
 # ============================================================
 
-def scan_bar():
+def scan_pixels():
 
     pixels = []
 
@@ -244,42 +248,95 @@ def scan_bar():
         BAR_RIGHT + 1
     ):
 
-        color = get_pixel(
-            x,
-            BAR_Y
-        )
-
         pixels.append(
-            (x, color)
+            (
+                x,
+                get_pixel(x, BAR_Y)
+            )
         )
 
-    # --------------------------------------------------------
-    # Find the most common non-white background color.
-    # --------------------------------------------------------
+    return pixels
+
+
+# ============================================================
+# LEARN THE COLOR FOR THIS ROUND
+# ============================================================
+
+def learn_round_color():
+
+    print()
+    print("Learning color for this fish...")
+
+    start_time = time.time()
 
     color_counts = {}
 
-    for x, color in pixels:
+    # We look for colors that repeatedly appear
+    # in a small moving section.
+    while (
+        time.time() - start_time
+        < COLOR_LEARNING_TIME
+    ):
 
-        if is_white(color):
-            continue
+        if not running:
+            return None
 
-        color_counts[color] = (
-            color_counts.get(color, 0) + 1
-        )
+        pixels = scan_pixels()
+
+        for x, color in pixels:
+
+            # Ignore white target/background
+            if is_white(color):
+                continue
+
+            # Ignore extremely dark pixels
+            if (
+                color[0] < 10
+                and color[1] < 10
+                and color[2] < 10
+            ):
+                continue
+
+            # Round colors slightly so anti-aliasing
+            # doesn't create hundreds of tiny colors.
+            grouped = (
+                (color[0] // 4) * 4,
+                (color[1] // 4) * 4,
+                (color[2] // 4) * 4
+            )
+
+            color_counts[grouped] = (
+                color_counts.get(grouped, 0) + 1
+            )
+
+        time.sleep(SCAN_DELAY)
 
     if not color_counts:
-        return []
 
-    background = max(
+        print("Could not learn a color.")
+
+        return None
+
+    # Find the most frequently appearing color.
+    learned = max(
         color_counts,
         key=color_counts.get
     )
 
-    # --------------------------------------------------------
-    # Find sections that are significantly different
-    # from the background.
-    # --------------------------------------------------------
+    print(
+        f"Learned round color: RGB{learned}"
+    )
+
+    return learned
+
+
+# ============================================================
+# FIND THE LEARNED COLOR
+# ============================================================
+
+def find_color_width(learned_color):
+
+    pixels = scan_pixels()
 
     sections = []
 
@@ -287,18 +344,15 @@ def scan_bar():
 
     for x, color in pixels:
 
-        different = (
-            not is_white(color)
-            and
-            color_difference(
-                color,
-                background
-            ) >= COLOR_DIFFERENCE
+        matches = color_close(
+            color,
+            learned_color
         )
 
-        if different:
+        if matches:
 
             if current_start is None:
+
                 current_start = x
 
         else:
@@ -307,7 +361,7 @@ def scan_bar():
 
                 width = x - current_start
 
-                if width >= MIN_SECTION_WIDTH:
+                if width > 0:
 
                     sections.append(
                         (
@@ -318,63 +372,36 @@ def scan_bar():
 
                 current_start = None
 
-    # Handle section reaching the right edge.
+    # Handle section touching right edge
     if current_start is not None:
 
-        width = (
-            BAR_RIGHT
-            + 1
-            - current_start
-        )
-
-        if width >= MIN_SECTION_WIDTH:
-
-            sections.append(
-                (
-                    current_start,
-                    BAR_RIGHT
-                )
+        sections.append(
+            (
+                current_start,
+                BAR_RIGHT
             )
-
-    return sections
-
-
-# ============================================================
-# CHOOSE MOVING SECTION
-# ============================================================
-
-def choose_moving_section(
-    sections,
-    previous_center
-):
+        )
 
     if not sections:
+
         return None
 
-    # If we have a previous position,
-    # prefer the section closest to it.
-    if previous_center is not None:
-
-        closest = min(
-            sections,
-            key=lambda section:
-                abs(
-                    (
-                        section[0]
-                        + section[1]
-                    ) // 2
-                    - previous_center
-                )
-        )
-
-        return closest
-
-    # Otherwise choose the largest section.
-    return max(
+    # Choose the widest matching section.
+    section = max(
         sections,
-        key=lambda section:
-            section[1] - section[0]
+        key=lambda s:
+            s[1] - s[0]
     )
+
+    left_x, right_x = section
+
+    width = (
+        right_x
+        - left_x
+        + 1
+    )
+
+    return left_x, right_x, width
 
 
 # ============================================================
@@ -386,17 +413,34 @@ def play_fishing_minigame():
     print()
     print("======================================")
     print("FISHING MINIGAME")
-    print("NEW COLOR TRACKING")
+    print("ROUND COLOR LEARNING")
     print("CLICKS ENABLED")
     print("======================================")
 
+    # --------------------------------------------------------
+    # Learn color ONLY for this fish.
+    # --------------------------------------------------------
+
+    learned_color = learn_round_color()
+
+    if learned_color is None:
+
+        print("No usable color learned.")
+
+        return False
+
     start_time = time.time()
 
-    previous_center = None
     last_click = 0
     click_count = 0
 
-    time.sleep(0.10)
+    print(
+        "Tracking learned color..."
+    )
+
+    # --------------------------------------------------------
+    # Track learned color
+    # --------------------------------------------------------
 
     while (
         time.time() - start_time
@@ -406,65 +450,65 @@ def play_fishing_minigame():
         if not running:
             return False
 
-        sections = scan_bar()
-
-        section = choose_moving_section(
-            sections,
-            previous_center
+        result = find_color_width(
+            learned_color
         )
 
-        if section is not None:
+        if result is not None:
 
-            left_x, right_x = section
-
-            center = (
-                left_x + right_x
-            ) // 2
-
-            width = (
-                right_x - left_x
-            )
-
-            previous_center = center
-
-            current_time = time.time()
+            left_x, right_x, width = result
 
             print(
-                f"\rSection X={center} "
-                f"Width={width} "
-                f"Sections={len(sections)}",
+                f"\rColor bar: "
+                f"X={left_x}-{right_x} "
+                f"Width={width}",
                 end=""
             )
 
             # ------------------------------------------------
-            # Click when the tracked section reaches
-            # the left side of the fishing range.
+            # Same basic idea as the old AHK:
+            #
+            # When the visible matching bar gets narrow,
+            # click.
             # ------------------------------------------------
 
             if (
-                center <= BAR_LEFT + TARGET_DISTANCE
+                width < CLICK_WIDTH
                 and
-                current_time - last_click
+                time.time() - last_click
                 > CLICK_COOLDOWN
             ):
 
                 native_click()
 
                 click_count += 1
-                last_click = current_time
+                last_click = time.time()
 
                 print()
+
                 print(
                     f"CLICK #{click_count} "
-                    f"| X={center}"
+                    f"| Width={width}"
                 )
 
         time.sleep(SCAN_DELAY)
 
     print()
+
     print(
         f"Fishing detection finished. "
         f"Clicks: {click_count}"
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Forget the color after the fish.
+    # --------------------------------------------------------
+
+    learned_color = None
+
+    print(
+        "Round color erased."
     )
 
     return True
@@ -553,8 +597,8 @@ print("======================================")
 print("F8 = Start")
 print("F3 = Emergency Stop")
 print()
-print("New fishing color tracking enabled.")
-print("Fishing clicks are ENABLED.")
+print("Round-by-round color learning enabled.")
+print("Each fish gets its own temporary color.")
 print("======================================")
 
 keyboard.wait()
