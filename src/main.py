@@ -18,11 +18,17 @@ BAR_LEFT = 757
 BAR_RIGHT = 1161
 BAR_Y = 767
 
-BAR_SAMPLE_X = 955
+SCAN_DELAY = 0.008
 
-FISHING_THRESHOLD = 25
+# How different a pixel must be from the background
+COLOR_DIFFERENCE = 25
 
-SCAN_DELAY = 0.01
+# Minimum number of pixels needed to count as a section
+MIN_SECTION_WIDTH = 3
+
+# Fishing timing
+TARGET_DISTANCE = 8
+CLICK_COOLDOWN = 0.025
 
 running = False
 
@@ -159,18 +165,12 @@ def is_white(color):
     )
 
 
-def colors_match(
-    color1,
-    color2,
-    tolerance=10
-):
+def color_difference(color1, color2):
 
     return (
-        abs(color1[0] - color2[0]) <= tolerance
-        and
-        abs(color1[1] - color2[1]) <= tolerance
-        and
-        abs(color1[2] - color2[2]) <= tolerance
+        abs(color1[0] - color2[0])
+        + abs(color1[1] - color2[1])
+        + abs(color1[2] - color2[2])
     )
 
 
@@ -232,33 +232,13 @@ def wait_for_minigame():
 
 
 # ============================================================
-# GET FRESH RECTANGLE COLOR
+# FIND COLORED SECTIONS
 # ============================================================
 
-def get_fishing_color():
+def scan_bar():
 
-    color = get_pixel(
-        BAR_SAMPLE_X,
-        BAR_Y
-    )
+    pixels = []
 
-    print(
-        f"Sampled fishing color: RGB{color}"
-    )
-
-    return color
-
-
-# ============================================================
-# FIND COLOR RANGE
-# ============================================================
-
-def find_color_range(bar_color):
-
-    left_x = None
-    right_x = None
-
-    # Find first matching pixel
     for x in range(
         BAR_LEFT,
         BAR_RIGHT + 1
@@ -269,45 +249,131 @@ def find_color_range(bar_color):
             BAR_Y
         )
 
-        if colors_match(
-            color,
-            bar_color,
-            10
-        ):
-
-            left_x = x
-            break
-
-    if left_x is None:
-        return None
-
-    # Follow the matching pixels
-    right_x = left_x
-
-    for x in range(
-        left_x + 1,
-        BAR_RIGHT + 1
-    ):
-
-        color = get_pixel(
-            x,
-            BAR_Y
+        pixels.append(
+            (x, color)
         )
 
-        if colors_match(
-            color,
-            bar_color,
-            10
-        ):
+    # --------------------------------------------------------
+    # Find the most common non-white background color.
+    # --------------------------------------------------------
 
-            right_x = x
+    color_counts = {}
+
+    for x, color in pixels:
+
+        if is_white(color):
+            continue
+
+        color_counts[color] = (
+            color_counts.get(color, 0) + 1
+        )
+
+    if not color_counts:
+        return []
+
+    background = max(
+        color_counts,
+        key=color_counts.get
+    )
+
+    # --------------------------------------------------------
+    # Find sections that are significantly different
+    # from the background.
+    # --------------------------------------------------------
+
+    sections = []
+
+    current_start = None
+
+    for x, color in pixels:
+
+        different = (
+            not is_white(color)
+            and
+            color_difference(
+                color,
+                background
+            ) >= COLOR_DIFFERENCE
+        )
+
+        if different:
+
+            if current_start is None:
+                current_start = x
 
         else:
-            break
 
-    return (
-        left_x,
-        right_x
+            if current_start is not None:
+
+                width = x - current_start
+
+                if width >= MIN_SECTION_WIDTH:
+
+                    sections.append(
+                        (
+                            current_start,
+                            x - 1
+                        )
+                    )
+
+                current_start = None
+
+    # Handle section reaching the right edge.
+    if current_start is not None:
+
+        width = (
+            BAR_RIGHT
+            + 1
+            - current_start
+        )
+
+        if width >= MIN_SECTION_WIDTH:
+
+            sections.append(
+                (
+                    current_start,
+                    BAR_RIGHT
+                )
+            )
+
+    return sections
+
+
+# ============================================================
+# CHOOSE MOVING SECTION
+# ============================================================
+
+def choose_moving_section(
+    sections,
+    previous_center
+):
+
+    if not sections:
+        return None
+
+    # If we have a previous position,
+    # prefer the section closest to it.
+    if previous_center is not None:
+
+        closest = min(
+            sections,
+            key=lambda section:
+                abs(
+                    (
+                        section[0]
+                        + section[1]
+                    ) // 2
+                    - previous_center
+                )
+        )
+
+        return closest
+
+    # Otherwise choose the largest section.
+    return max(
+        sections,
+        key=lambda section:
+            section[1] - section[0]
     )
 
 
@@ -320,20 +386,16 @@ def play_fishing_minigame():
     print()
     print("======================================")
     print("FISHING MINIGAME")
+    print("NEW COLOR TRACKING")
     print("CLICKS ENABLED")
     print("======================================")
 
-    # The rectangle color can change every fish,
-    # so sample it every new minigame.
-    bar_color = get_fishing_color()
-
     start_time = time.time()
 
+    previous_center = None
+    last_click = 0
     click_count = 0
 
-    last_click = 0
-
-    # Give the UI a moment to fully appear.
     time.sleep(0.10)
 
     while (
@@ -344,62 +406,57 @@ def play_fishing_minigame():
         if not running:
             return False
 
-        color_range = find_color_range(
-            bar_color
+        sections = scan_bar()
+
+        section = choose_moving_section(
+            sections,
+            previous_center
         )
 
-        current_time = time.time()
+        if section is not None:
 
-        if color_range is not None:
-
-            left_x, right_x = color_range
-
-            width = right_x - left_x
+            left_x, right_x = section
 
             center = (
                 left_x + right_x
             ) // 2
 
-            # Click when the detected bar becomes
-            # small, matching the old macro's
-            # advanced fishing logic.
+            width = (
+                right_x - left_x
+            )
+
+            previous_center = center
+
+            current_time = time.time()
+
+            print(
+                f"\rSection X={center} "
+                f"Width={width} "
+                f"Sections={len(sections)}",
+                end=""
+            )
+
+            # ------------------------------------------------
+            # Click when the tracked section reaches
+            # the left side of the fishing range.
+            # ------------------------------------------------
+
             if (
-                width < FISHING_THRESHOLD
+                center <= BAR_LEFT + TARGET_DISTANCE
                 and
-                current_time - last_click > 0.025
-            ):
-
-                native_click()
-
-                click_count += 1
-
-                last_click = current_time
-
-                print(
-                    f"CLICK #{click_count} | "
-                    f"X={center} | "
-                    f"Width={width}"
-                )
-
-        else:
-
-            # If the sampled color disappeared,
-            # click once, matching the old macro's
-            # fallback behavior.
-            if (
                 current_time - last_click
-                > 0.08
+                > CLICK_COOLDOWN
             ):
 
                 native_click()
 
                 click_count += 1
-
                 last_click = current_time
 
+                print()
                 print(
-                    f"CLICK #{click_count} | "
-                    f"Bar color not found"
+                    f"CLICK #{click_count} "
+                    f"| X={center}"
                 )
 
         time.sleep(SCAN_DELAY)
@@ -496,6 +553,7 @@ print("======================================")
 print("F8 = Start")
 print("F3 = Emergency Stop")
 print()
+print("New fishing color tracking enabled.")
 print("Fishing clicks are ENABLED.")
 print("======================================")
 
