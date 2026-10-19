@@ -11,7 +11,6 @@ import pyautogui
 
 FISH_BUTTON = (853, 832)
 
-# Old macro's 1080p fish-result close button
 FISH_RESULT_CLOSE = (1113, 342)
 
 MINIGAME_START_PIXEL = (1176, 836)
@@ -27,6 +26,13 @@ COLOR_SAMPLE_DELAY = 0.050
 SCAN_DELAY = 0.010
 
 COLOR_TOLERANCE = 10
+
+# How long the learned color can disappear before
+# we consider something else to be wrong.
+#
+# IMPORTANT:
+# We DO NOT click during this period.
+MISSING_COLOR_GRACE = 1.00
 
 running = False
 
@@ -474,7 +480,12 @@ def play_fishing_minigame():
 
     click_count = 0
 
-    last_click_time = 0
+    # Tracks whether the bar was already inside
+    # the click zone.
+    was_inside_click_zone = False
+
+    # Tracks when the learned color disappeared.
+    missing_color_start = None
 
     while (
         time.time() - start_time
@@ -488,31 +499,71 @@ def play_fishing_minigame():
             current_bar_color
         )
 
+        # ====================================================
+        # COLOR NOT FOUND
+        # ====================================================
+
         if result is None:
 
-            now = time.time()
+            if missing_color_start is None:
 
-            if (
-                now - last_click_time
-                >= 0.025
-            ):
+                missing_color_start = time.time()
 
-                native_click()
+                print()
+                print(
+                    "Bar temporarily hidden..."
+                )
 
-                click_count += 1
+            missing_time = (
+                time.time()
+                - missing_color_start
+            )
 
-                last_click_time = now
+            # IMPORTANT:
+            #
+            # DO NOT CLICK.
+            #
+            # The timer can cover the colored
+            # rectangle in the middle.
+            #
+            # We simply wait for the color
+            # to become visible again.
+
+            if missing_time >= MISSING_COLOR_GRACE:
 
                 print(
-                    f"CLICK #{click_count} "
-                    f"| Bar color not found"
+                    f"\rStill hidden "
+                    f"({missing_time:.2f}s)...",
+                    end=""
                 )
+
+            was_inside_click_zone = False
 
             time.sleep(
                 SCAN_DELAY
             )
 
             continue
+
+        # ====================================================
+        # BAR FOUND AGAIN
+        # ====================================================
+
+        if missing_color_start is not None:
+
+            hidden_time = (
+                time.time()
+                - missing_color_start
+            )
+
+            print()
+
+            print(
+                f"Bar visible again "
+                f"after {hidden_time:.2f}s."
+            )
+
+            missing_color_start = None
 
         left_x, right_x, bar_width = result
 
@@ -522,35 +573,47 @@ def play_fishing_minigame():
             end=""
         )
 
-        if (
+        # ====================================================
+        # CLICK ZONE
+        # ====================================================
+
+        inside_click_zone = (
             bar_width
             < ADVANCED_FISHING_THRESHOLD
+        )
+
+        # Only click when the bar ENTERS the
+        # click zone.
+        #
+        # This prevents:
+        #
+        # Width 20
+        # Width 20
+        # Width 20
+        # Width 20
+        #
+        # from causing four separate clicks.
+
+        if (
+            inside_click_zone
+            and not was_inside_click_zone
         ):
 
-            now = time.time()
+            native_click()
 
-            if (
-                now - last_click_time
-                >= 0.025
-            ):
+            click_count += 1
 
-                native_click()
+            print()
 
-                click_count += 1
+            print(
+                f"CLICK #{click_count} "
+                f"| X={left_x}-{right_x} "
+                f"| Width={bar_width}"
+            )
 
-                last_click_time = now
-
-                print()
-
-                print(
-                    f"CLICK #{click_count} "
-                    f"| X={left_x}-{right_x} "
-                    f"| Width={bar_width}"
-                )
-
-                time.sleep(
-                    0.025
-                )
+        was_inside_click_zone = (
+            inside_click_zone
+        )
 
         time.sleep(
             SCAN_DELAY
@@ -581,7 +644,6 @@ def close_fish_result():
     print()
     print("Closing fish result...")
 
-    # Same basic timing as the old macro.
     time.sleep(0.30)
 
     if not running:
@@ -600,7 +662,6 @@ def close_fish_result():
     if not running:
         return False
 
-    # Old macro waits before clicking.
     time.sleep(0.70)
 
     if not running:
@@ -700,15 +761,11 @@ def run_macro():
                     "Stopping macro for now."
                 )
 
-                break
-
             break
 
         if not running:
             break
 
-        # Small pause before starting
-        # the next fishing cycle.
         time.sleep(0.30)
 
 
@@ -777,6 +834,7 @@ print("F3 = Emergency Stop")
 print()
 print("Fishing + fish-result loop enabled.")
 print("Advanced threshold: 25 pixels")
+print("Missing-color protection: 1.00 second")
 print("======================================")
 
 keyboard.wait()
