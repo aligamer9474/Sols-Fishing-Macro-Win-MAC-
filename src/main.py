@@ -12,39 +12,13 @@ running = False
 
 FISH_BUTTON = (853, 832)
 
-FISH_CAUGHT_X = None
-COLLECTIONS_BUTTON = None
-COLLECTIONS_CLOSE_X = None
-SELL_BUTTON = None
-SELL_ALL_BUTTON = None
-SHOP_CLOSE_X = None
-
-# ============================================================
-# FISHING MINIGAME COORDINATES
-# ============================================================
-
 MINIGAME_START_PIXEL = (1176, 836)
-
-BAR_SAMPLE_POINT = (955, 767)
 
 BAR_SCAN_LEFT = 757
 BAR_SCAN_RIGHT = 1161
 BAR_SCAN_Y = 767
 
-ADVANCED_FISHING_THRESHOLD = 25
-
-MINIGAME_SCAN_DELAY = 0.01
-
-# The fishing minigame takes about 18 seconds to start.
 MINIGAME_TIMEOUT = 19
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
-MAX_FISHING_CYCLES = 15
-
-CLICK_DELAY = 0.25
 
 # ============================================================
 # WINDOWS MOUSE INPUT
@@ -146,16 +120,7 @@ def native_click():
     )
 
 
-def click_position(position, name="button"):
-
-    if position is None:
-
-        print(
-            f"[!] {name} coordinate "
-            f"has not been set yet."
-        )
-
-        return False
+def click_position(position, name):
 
     print(
         f"Moving to {name}: {position}"
@@ -167,17 +132,15 @@ def click_position(position, name="button"):
     )
 
     if not running:
-        return False
+        return
 
-    time.sleep(CLICK_DELAY)
+    time.sleep(0.25)
 
     native_click()
 
-    print(f"Clicked {name}.")
-
-    time.sleep(CLICK_DELAY)
-
-    return True
+    print(
+        f"Clicked {name}."
+    )
 
 
 # ============================================================
@@ -187,42 +150,15 @@ def click_position(position, name="button"):
 def get_pixel(x, y):
 
     try:
-
-        return pyautogui.pixel(
-            x,
-            y
-        )
+        return pyautogui.pixel(x, y)
 
     except Exception:
-
         return None
-
-
-def colors_match(
-    color1,
-    color2,
-    tolerance=5
-):
-
-    if color1 is None or color2 is None:
-        return False
-
-    return all(
-        abs(
-            color1[i] -
-            color2[i]
-        ) <= tolerance
-
-        for i in range(3)
-    )
 
 
 def is_white_pixel(x, y):
 
-    color = get_pixel(
-        x,
-        y
-    )
+    color = get_pixel(x, y)
 
     if color is None:
         return False
@@ -235,32 +171,15 @@ def is_white_pixel(x, y):
 
 
 # ============================================================
-# FISHING
+# WAIT FOR MINIGAME
 # ============================================================
-
-def start_fishing():
-
-    print()
-    print("=== START FISHING ===")
-
-    return click_position(
-        FISH_BUTTON,
-        "Fish button"
-    )
-
 
 def wait_for_minigame():
 
     print()
     print("Waiting for fishing minigame...")
-    print(
-        "The game may take a while "
-        "before the minigame appears."
-    )
 
     start_time = time.time()
-
-    last_message_time = start_time
 
     while running:
 
@@ -270,8 +189,8 @@ def wait_for_minigame():
 
             print()
             print(
-                f"[!] Waited {elapsed:.1f} seconds "
-                "but could not detect the minigame."
+                f"Could not detect minigame "
+                f"after {elapsed:.1f} seconds."
             )
 
             return False
@@ -283,700 +202,230 @@ def wait_for_minigame():
 
             print()
             print(
-                f"Fishing minigame detected "
-                f"after {elapsed:.1f} seconds!"
+                f"Minigame detected after "
+                f"{elapsed:.1f} seconds!"
             )
 
             return True
 
-        if time.time() - last_message_time >= 5:
-
-            print(
-                f"Still waiting... "
-                f"{elapsed:.1f} seconds"
-            )
-
-            last_message_time = time.time()
-
-        time.sleep(
-            MINIGAME_SCAN_DELAY
-        )
+        time.sleep(0.01)
 
     return False
 
 
-def find_bar_color():
+# ============================================================
+# COLOR SCANNER
+# ============================================================
 
-    color = get_pixel(
-        BAR_SAMPLE_POINT[0],
-        BAR_SAMPLE_POINT[1]
-    )
-
-    if color is None:
-        return None
-
-    if (
-        color[0] > 240
-        and color[1] > 240
-        and color[2] > 240
-    ):
-
-        return None
-
-    if (
-        color[0] < 15
-        and color[1] < 15
-        and color[2] < 15
-    ):
-
-        return None
-
-    return color
-
-
-def find_contiguous_bar_width(
-    bar_color
-):
-
-    if bar_color is None:
-        return 0
-
-    width = 0
-    best_width = 0
+def scan_bar():
 
     screenshot = pyautogui.screenshot(
         region=(
             BAR_SCAN_LEFT,
             BAR_SCAN_Y,
-            BAR_SCAN_RIGHT -
-            BAR_SCAN_LEFT + 1,
+            BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1,
             1
         )
     )
 
+    pixels = []
+
     for x in range(
-        BAR_SCAN_RIGHT -
-        BAR_SCAN_LEFT + 1
+        BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1
     ):
 
-        pixel = screenshot.getpixel(
+        color = screenshot.getpixel(
             (x, 0)
         )
 
-        if colors_match(
-            pixel,
-            bar_color,
-            tolerance=10
-        ):
-
-            width += 1
-
-            if width > best_width:
-                best_width = width
-
-        else:
-
-            width = 0
-
-    return best_width
-
-
-def play_fishing_minigame():
-
-    print()
-    print("=== FISHING MINIGAME ===")
-
-    if not wait_for_minigame():
-
-        return False
-
-    print(
-        "Fishing minigame has started."
-    )
-
-    print(
-        "Reading fishing bar color..."
-    )
-
-    bar_color = None
-
-    time.sleep(0.1)
-
-    for _ in range(20):
-
-        if not running:
-            return False
-
-        bar_color = find_bar_color()
-
-        if bar_color is not None:
-            break
-
-        time.sleep(0.02)
-
-    if bar_color is None:
-
-        print(
-            "[!] Could not detect "
-            "fishing bar color."
-        )
-
-        print(
-            "[!] Stopping so we don't "
-            "randomly click."
-        )
-
-        return False
-
-    print(
-        f"Detected bar color: "
-        f"{bar_color}"
-    )
-
-    print(
-        "Watching fishing bar..."
-    )
-
-    start_time = time.time()
-
-    while running:
-
-        if (
-            time.time() -
-            start_time
-            >= MINIGAME_TIMEOUT
-        ):
-
-            print(
-                "[!] Fishing minigame "
-                "timed out."
+        pixels.append(
+            (
+                BAR_SCAN_LEFT + x,
+                color
             )
-
-            return False
-
-        width = find_contiguous_bar_width(
-            bar_color
         )
 
-        if width == 0:
-
-            print(
-                "Target lost - clicking!"
-            )
-
-            native_click()
-
-            time.sleep(0.15)
-
-        elif (
-            width <
-            ADVANCED_FISHING_THRESHOLD
-        ):
-
-            print(
-                f"Target width: {width} "
-                "- clicking!"
-            )
-
-            native_click()
-
-            time.sleep(0.15)
-
-        else:
-
-            time.sleep(
-                MINIGAME_SCAN_DELAY
-            )
-
-        if not is_white_pixel(
-            MINIGAME_START_PIXEL[0],
-            MINIGAME_START_PIXEL[1]
-        ):
-
-            time.sleep(0.2)
-
-            print(
-                "Fishing minigame finished."
-            )
-
-            return True
-
-    return False
+    return pixels
 
 
-def close_fish_caught_popup():
+def summarize_colors(pixels):
 
-    if FISH_CAUGHT_X is None:
+    color_positions = {}
+
+    for x, color in pixels:
+
+        if color not in color_positions:
+
+            color_positions[color] = []
+
+        color_positions[color].append(x)
+
+    # Sort colors by number of pixels.
+    sorted_colors = sorted(
+        color_positions.items(),
+        key=lambda item: len(item[1]),
+        reverse=True
+    )
+
+    return sorted_colors
+
+
+def print_scan():
+
+    pixels = scan_bar()
+
+    colors = summarize_colors(pixels)
+
+    print()
+    print(
+        "--------------------------------"
+    )
+    print("FISHING BAR COLOR SCAN")
+    print(
+        "--------------------------------"
+    )
+
+    print(
+        f"Scanning X={BAR_SCAN_LEFT} "
+        f"to X={BAR_SCAN_RIGHT}"
+    )
+
+    print()
+
+    # Show the most common colors.
+    # This helps identify the background,
+    # orange rectangle, target area, etc.
+
+    for color, positions in colors[:15]:
+
+        first_x = positions[0]
+        last_x = positions[-1]
 
         print(
-            "[!] Fish Caught X "
-            "coordinate not set yet."
+            f"RGB {color} | "
+            f"pixels: {len(positions):3d} | "
+            f"X: {first_x}-{last_x}"
         )
 
-        return False
-
-    return click_position(
-        FISH_CAUGHT_X,
-        "Fish Caught X"
-    )
-
-
-# ============================================================
-# RESET CHARACTER
-# ============================================================
-
-def reset_character():
-
-    print()
-    print("=== RESET CHARACTER ===")
-
-    if not running:
-        return
-
-    print("Pressing ESC...")
-
-    keyboard.press("esc")
-
-    time.sleep(0.5)
-
-    keyboard.release("esc")
-
-    time.sleep(1)
-
-    if not running:
-        return
-
-    print("Pressing R...")
-
-    keyboard.press("r")
-
-    time.sleep(0.5)
-
-    keyboard.release("r")
-
-    time.sleep(1)
-
-    if not running:
-        return
-
-    print("Pressing Enter...")
-
-    keyboard.press("enter")
-
-    time.sleep(0.5)
-
-    keyboard.release("enter")
-
-    time.sleep(3)
-
     print(
-        "Character reset sequence finished."
+        "--------------------------------"
     )
 
 
 # ============================================================
-# COLLECTIONS / BEACH ALIGNMENT
+# SCANNER
 # ============================================================
 
-def open_collections():
-
-    print()
-    print("=== OPEN COLLECTIONS ===")
-
-    if COLLECTIONS_BUTTON is None:
-
-        print(
-            "[!] Collections coordinate "
-            "not set yet."
-        )
-
-        return False
-
-    return click_position(
-        COLLECTIONS_BUTTON,
-        "Collections"
-    )
-
-
-def close_collections():
-
-    print(
-        "Closing Collections..."
-    )
-
-    if COLLECTIONS_CLOSE_X is None:
-
-        print(
-            "[!] Collections close X "
-            "coordinate not set yet."
-        )
-
-        return False
-
-    return click_position(
-        COLLECTIONS_CLOSE_X,
-        "Collections X"
-    )
-
-
-def face_beach():
-
-    print(
-        "Player should now be "
-        "facing the beach."
-    )
-
-
-# ============================================================
-# CAMERA
-# ============================================================
-
-def reset_camera():
-
-    print()
-    print("=== CAMERA RESET ===")
-
-    if not running:
-        return
-
-    print("Zooming in...")
-
-    keyboard.press("o")
-
-    time.sleep(3)
-
-    keyboard.release("o")
-
-    time.sleep(0.5)
-
-    if not running:
-        return
-
-    print("Zooming out...")
-
-    keyboard.press("i")
-
-    time.sleep(3)
-
-    keyboard.release("i")
-
-    print(
-        "Camera reset finished."
-    )
-
-
-# ============================================================
-# PATH TO FISH SHOP
-# ============================================================
-
-def path_to_fish_shop():
-
-    print()
-    print("=== PATH TO FISH SHOP ===")
-
-    if not running:
-        return
-
-    print(
-        "Moving toward wall..."
-    )
-
-    keyboard.keyDown("w")
-
-    time.sleep(2)
-
-    keyboard.keyUp("w")
-
-    if not running:
-        return
-
-    print(
-        "Aligning for jump sequence..."
-    )
-
-    print(
-        "[!] Exact shop path "
-        "still needs calibration."
-    )
-
-
-# ============================================================
-# FISH SHOP
-# ============================================================
-
-def open_fish_shop():
-
-    print()
-    print("=== OPEN FISH SHOP ===")
-
-    if not running:
-        return False
-
-    print("Pressing E...")
-
-    keyboard.press("e")
-
-    time.sleep(0.5)
-
-    keyboard.release("e")
-
-    time.sleep(1)
-
-    return True
-
-
-def sell_fish():
-
-    print()
-    print("=== SELL FISH ===")
-
-    if SELL_BUTTON is None:
-
-        print(
-            "[!] Sell button coordinate "
-            "not set yet."
-        )
-
-        return False
-
-    click_position(
-        SELL_BUTTON,
-        "Sell"
-    )
-
-    if not running:
-        return False
-
-    if SELL_ALL_BUTTON is None:
-
-        print(
-            "[!] Sell All coordinate "
-            "not set yet."
-        )
-
-        return False
-
-    click_position(
-        SELL_ALL_BUTTON,
-        "Sell All"
-    )
-
-    return True
-
-
-def close_fish_shop():
-
-    print(
-        "Closing fish shop..."
-    )
-
-    if SHOP_CLOSE_X is None:
-
-        print(
-            "[!] Shop X coordinate "
-            "not set yet."
-        )
-
-        return False
-
-    return click_position(
-        SHOP_CLOSE_X,
-        "Shop X"
-    )
-
-
-# ============================================================
-# RETURN TO BEACH
-# ============================================================
-
-def return_to_beach():
-
-    print()
-    print("=== RETURN TO BEACH ===")
-
-    if not running:
-        return
-
-    print(
-        "Moving away from shop..."
-    )
-
-    keyboard.keyDown("a")
-
-    time.sleep(0.5)
-
-    keyboard.keyUp("a")
-
-    if not running:
-        return
-
-    print(
-        "Moving toward beach..."
-    )
-
-    keyboard.keyDown("s")
-
-    time.sleep(3)
-
-    keyboard.keyUp("s")
-
-    print(
-        "Returned toward beach."
-    )
-
-
-# ============================================================
-# MAIN MACRO
-# ============================================================
-
-def macro():
+def run_scanner():
 
     global running
 
     print()
     print("================================")
-    print("Sol's Fishing Macro")
+    print("FISHING COLOR SCANNER")
     print("================================")
     print()
 
-    fishing_cycles = 0
+    print(
+        "The scanner will NOT click "
+        "during the minigame."
+    )
 
-    while running:
+    print()
 
-        if not start_fishing():
-            break
+    # Click Fish
+    click_position(
+        FISH_BUTTON,
+        "Fish button"
+    )
 
-        if not running:
-            break
+    if not running:
+        return
 
-        if not play_fishing_minigame():
+    # Wait for minigame
+    if not wait_for_minigame():
 
-            print()
-            print("[STOPPED]")
-            print(
-                "Fishing minigame "
-                "could not be completed."
-            )
-
-            running = False
-
-            break
-
-        if not running:
-            break
-
-        if FISH_CAUGHT_X is not None:
-
-            close_fish_caught_popup()
-
-        else:
-
-            print(
-                "[!] Fish Caught X "
-                "not calibrated yet."
-            )
-
-        fishing_cycles += 1
+        running = False
 
         print()
         print(
-            f"Fishing cycle: "
-            f"{fishing_cycles}/"
-            f"{MAX_FISHING_CYCLES}"
+            "Scanner stopped because "
+            "the minigame was not detected."
         )
 
-        if (
-            fishing_cycles >=
-            MAX_FISHING_CYCLES
-        ):
-
-            print()
-            print(
-                "Maximum fishing cycles reached."
-            )
-
-            reset_character()
-
-            if not running:
-                break
-
-            open_collections()
-
-            if not running:
-                break
-
-            close_collections()
-
-            if not running:
-                break
-
-            face_beach()
-
-            reset_camera()
-
-            if not running:
-                break
-
-            path_to_fish_shop()
-
-            if not running:
-                break
-
-            open_fish_shop()
-
-            if not running:
-                break
-
-            sell_fish()
-
-            if not running:
-                break
-
-            close_fish_shop()
-
-            if not running:
-                break
-
-            return_to_beach()
-
-            fishing_cycles = 0
-
-            print()
-            print("================================")
-            print("Back to fishing.")
-            print("================================")
-
-        time.sleep(0.5)
+        return
 
     print()
-    print("Macro stopped.")
+    print(
+        "MINIGAME FOUND!"
+    )
+
+    print()
+    print(
+        "Keep watching the minigame."
+    )
+
+    print(
+        "The scanner will take several "
+        "samples while the orange "
+        "rectangle moves."
+    )
+
+    print()
+
+    # Take several scans so we can see
+    # how the moving rectangle changes.
+    for scan_number in range(1, 11):
+
+        if not running:
+            break
+
+        print()
+        print(
+            f"========== SCAN "
+            f"{scan_number}/10 =========="
+        )
+
+        print_scan()
+
+        time.sleep(0.25)
+
+    print()
+    print("================================")
+    print("SCANNING FINISHED")
+    print("================================")
+    print()
+
+    print(
+        "Send me the CMD output from "
+        "these scans."
+    )
+
+    running = False
 
 
 # ============================================================
 # HOTKEYS
 # ============================================================
 
-def toggle_macro():
+def start_scanner():
 
     global running
 
     if running:
 
-        running = False
-
-        print()
         print(
-            "Macro stopped!"
+            "Scanner is already running."
         )
 
-    else:
+        return
 
-        running = True
+    running = True
 
-        threading.Thread(
-            target=macro,
-            daemon=True
-        ).start()
+    threading.Thread(
+        target=run_scanner,
+        daemon=True
+    ).start()
 
 
 def emergency_stop():
@@ -993,7 +442,7 @@ def emergency_stop():
 
 keyboard.add_hotkey(
     "f8",
-    toggle_macro
+    start_scanner
 )
 
 keyboard.add_hotkey(
@@ -1006,20 +455,11 @@ keyboard.add_hotkey(
 # START
 # ============================================================
 
-print(
-    "Sol's Fishing Macro"
-)
-
+print("Sol's Fishing Color Scanner")
 print()
 
 print(
-    "Fish button: (853, 832)"
-)
-
-print()
-
-print(
-    "F8 = Start / Stop"
+    "F8 = Start Scanner"
 )
 
 print(
