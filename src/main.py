@@ -27,18 +27,16 @@ SCAN_DELAY = 0.010
 
 COLOR_TOLERANCE = 10
 
-# Normal fishing click cooldown.
-VISIBLE_CLICK_COOLDOWN = 0.100
+# How long the bar must leave the danger zone
+# before another normal click is allowed.
+REARM_DELAY = 0.08
 
-# IMPORTANT:
-# If the bar color disappears, the macro is allowed
-# to "panic click" only ONCE every 0.8 seconds.
-MISSING_COLOR_CLICK_COOLDOWN = 0.800
+# If the bar disappears completely, allow only
+# one controlled fallback click.
+MISSING_COLOR_COOLDOWN = 0.80
 
 running = False
-
 current_bar_color = None
-
 cycle_count = 0
 
 
@@ -379,7 +377,6 @@ def find_bar(bar_color):
             break
 
     if left_x is None:
-
         return None
 
     right_x = left_x
@@ -437,7 +434,7 @@ def play_fishing_minigame():
     print()
     print("======================================")
     print("FISHING MINIGAME")
-    print("OLD MACRO DETECTION")
+    print("STATE-BASED DETECTION")
     print("CLICKS ENABLED")
     print("======================================")
 
@@ -473,17 +470,23 @@ def play_fishing_minigame():
         f"RGB{current_bar_color}"
     )
 
-    print(
-        "Tracking bar..."
-    )
+    print("Tracking bar...")
 
     start_time = time.time()
 
     click_count = 0
 
-    last_click_time = 0
+    last_panic_click = 0
 
-    was_missing = False
+    # IMPORTANT:
+    # Once we click while the bar is <25 pixels,
+    # we lock normal clicking until the bar leaves
+    # the danger zone.
+    danger_locked = False
+
+    # Used to prevent one hidden frame from
+    # immediately triggering another panic click.
+    was_visible = False
 
     while (
         time.time() - start_time
@@ -498,35 +501,32 @@ def play_fishing_minigame():
         )
 
         # ====================================================
-        # BAR COLOR NOT FOUND
+        # BAR NOT FOUND
         # ====================================================
 
         if result is None:
 
+            # Do NOT machine-gun click.
+
             now = time.time()
 
-            # PANIC MODE
-            #
-            # The bar is hidden, so we do NOT spam.
-            # We only click once every 0.8 seconds.
-
             if (
-                now - last_click_time
-                >= MISSING_COLOR_CLICK_COOLDOWN
+                was_visible
+                and
+                now - last_panic_click
+                >= MISSING_COLOR_COOLDOWN
             ):
 
                 native_click()
 
                 click_count += 1
 
-                last_click_time = now
+                last_panic_click = now
 
                 print(
                     f"PANIC CLICK #{click_count} "
-                    f"| Color not found"
+                    f"| Color temporarily hidden"
                 )
-
-            was_missing = True
 
             time.sleep(
                 SCAN_DELAY
@@ -535,27 +535,20 @@ def play_fishing_minigame():
             continue
 
         # ====================================================
-        # BAR FOUND AGAIN
+        # BAR FOUND
         # ====================================================
 
-        if was_missing:
-
-            print(
-                "Bar detected again."
-            )
-
-            was_missing = False
+        was_visible = True
 
         left_x, right_x, bar_width = result
 
-        # Print the current bar cleanly.
         print(
             f"Bar X={left_x}-{right_x} "
             f"Width={bar_width}"
         )
 
         # ====================================================
-        # NORMAL CLICKING
+        # DANGER ZONE
         # ====================================================
 
         if (
@@ -563,24 +556,35 @@ def play_fishing_minigame():
             < ADVANCED_FISHING_THRESHOLD
         ):
 
-            now = time.time()
+            # Only click ONCE when entering
+            # the danger zone.
 
-            if (
-                now - last_click_time
-                >= VISIBLE_CLICK_COOLDOWN
-            ):
+            if not danger_locked:
 
                 native_click()
 
                 click_count += 1
 
-                last_click_time = now
+                danger_locked = True
 
                 print(
                     f"CLICK #{click_count} "
                     f"| X={left_x}-{right_x} "
                     f"| Width={bar_width}"
                 )
+
+        else:
+
+            # The bar has left the danger zone.
+            # This rearms the next click.
+
+            if danger_locked:
+
+                time.sleep(
+                    REARM_DELAY
+                )
+
+                danger_locked = False
 
         time.sleep(
             SCAN_DELAY
@@ -595,9 +599,7 @@ def play_fishing_minigame():
 
     current_bar_color = None
 
-    print(
-        "Bar color erased."
-    )
+    print("Bar color erased.")
 
     return True
 
@@ -636,9 +638,7 @@ def close_fish_result():
 
     native_click()
 
-    print(
-        "Fish result closed."
-    )
+    print("Fish result closed.")
 
     time.sleep(0.30)
 
@@ -801,7 +801,7 @@ print("F3 = Emergency Stop")
 print()
 print("Fishing + fish-result loop enabled.")
 print("Advanced threshold: 25 pixels")
-print("Panic click cooldown: 0.8 seconds")
+print("State-based clicking enabled.")
 print("======================================")
 
 keyboard.wait()
