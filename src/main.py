@@ -4,24 +4,30 @@ import ctypes
 import keyboard
 import pyautogui
 
-running = False
 
 # ============================================================
-# COORDINATES
+# SETTINGS
 # ============================================================
 
 FISH_BUTTON = (853, 832)
 
 MINIGAME_START_PIXEL = (1176, 836)
 
-BAR_SCAN_LEFT = 757
-BAR_SCAN_RIGHT = 1161
-BAR_SCAN_Y = 767
-
 MINIGAME_TIMEOUT = 19
 
+# Fishing bar region
+BAR_LEFT = 757
+BAR_TOP = 762
+BAR_WIDTH = 405
+BAR_HEIGHT = 21
+
+SCAN_DELAY = 0.10
+
+running = False
+
+
 # ============================================================
-# WINDOWS MOUSE INPUT
+# WINDOWS MOUSE
 # ============================================================
 
 user32 = ctypes.windll.user32
@@ -34,52 +40,29 @@ MOUSEEVENTF_LEFTUP = 0x0004
 class POINT(ctypes.Structure):
     _fields_ = [
         ("x", ctypes.c_long),
-        ("y", ctypes.c_long),
+        ("y", ctypes.c_long)
     ]
 
 
 def get_mouse_position():
-
     point = POINT()
-
-    user32.GetCursorPos(
-        ctypes.byref(point)
-    )
-
+    user32.GetCursorPos(ctypes.byref(point))
     return point.x, point.y
 
 
 def native_move_to(x, y):
-
     start_x, start_y = get_mouse_position()
 
-    distance = max(
-        abs(x - start_x),
-        abs(y - start_y)
-    )
+    dx = x - start_x
+    dy = y - start_y
 
-    if distance == 0:
-        return
+    distance = max(abs(dx), abs(dy))
 
-    steps = max(
-        20,
-        int(distance / 8)
-    )
+    steps = max(20, int(distance / 8))
 
     for i in range(1, steps + 1):
-
-        if not running:
-            return
-
-        target_x = int(
-            start_x +
-            (x - start_x) * i / steps
-        )
-
-        target_y = int(
-            start_y +
-            (y - start_y) * i / steps
-        )
+        target_x = start_x + int(dx * i / steps)
+        target_y = start_y + int(dy * i / steps)
 
         current_x, current_y = get_mouse_position()
 
@@ -87,7 +70,6 @@ def native_move_to(x, y):
         move_y = target_y - current_y
 
         if move_x != 0 or move_y != 0:
-
             user32.mouse_event(
                 MOUSEEVENTF_MOVE,
                 move_x,
@@ -100,47 +82,16 @@ def native_move_to(x, y):
 
 
 def native_click():
-
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTDOWN,
-        0,
-        0,
-        0,
-        0
-    )
-
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     time.sleep(0.05)
-
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTUP,
-        0,
-        0,
-        0,
-        0
-    )
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
 
-def click_position(position, name):
-
-    print(
-        f"Moving to {name}: {position}"
-    )
-
-    native_move_to(
-        position[0],
-        position[1]
-    )
-
-    if not running:
-        return
-
+def click_position(x, y):
+    native_move_to(x, y)
     time.sleep(0.25)
-
     native_click()
-
-    print(
-        f"Clicked {name}."
-    )
+    time.sleep(0.25)
 
 
 # ============================================================
@@ -148,26 +99,12 @@ def click_position(position, name):
 # ============================================================
 
 def get_pixel(x, y):
-
-    try:
-        return pyautogui.pixel(x, y)
-
-    except Exception:
-        return None
+    return pyautogui.pixel(x, y)
 
 
-def is_white_pixel(x, y):
-
-    color = get_pixel(x, y)
-
-    if color is None:
-        return False
-
-    return (
-        color[0] >= 245
-        and color[1] >= 245
-        and color[2] >= 245
-    )
+def is_white_pixel(color):
+    r, g, b = color
+    return r >= 245 and g >= 245 and b >= 245
 
 
 # ============================================================
@@ -175,255 +112,360 @@ def is_white_pixel(x, y):
 # ============================================================
 
 def wait_for_minigame():
-
     print()
-    print("Waiting for fishing minigame...")
+    print("Waiting for minigame...")
 
     start_time = time.time()
+    last_message = 0
 
-    while running:
+    while time.time() - start_time < MINIGAME_TIMEOUT:
+
+        color = get_pixel(
+            MINIGAME_START_PIXEL[0],
+            MINIGAME_START_PIXEL[1]
+        )
+
+        if is_white_pixel(color):
+            elapsed = time.time() - start_time
+            print(f"Minigame detected after {elapsed:.1f} seconds!")
+            return True
 
         elapsed = time.time() - start_time
 
-        if elapsed >= MINIGAME_TIMEOUT:
+        if int(elapsed) >= last_message + 5:
+            print(f"Still waiting... {elapsed:.1f}s")
+            last_message = int(elapsed)
 
-            print()
-            print(
-                f"Could not detect minigame "
-                f"after {elapsed:.1f} seconds."
-            )
+        time.sleep(0.05)
 
-            return False
-
-        if is_white_pixel(
-            MINIGAME_START_PIXEL[0],
-            MINIGAME_START_PIXEL[1]
-        ):
-
-            print()
-            print(
-                f"Minigame detected after "
-                f"{elapsed:.1f} seconds!"
-            )
-
-            return True
-
-        time.sleep(0.01)
-
+    print("Minigame timed out.")
     return False
 
 
 # ============================================================
-# COLOR SCANNER
+# FIND WHITE TARGET
 # ============================================================
 
-def scan_bar():
+def find_white_target(image):
 
-    screenshot = pyautogui.screenshot(
-        region=(
-            BAR_SCAN_LEFT,
-            BAR_SCAN_Y,
-            BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1,
-            1
-        )
-    )
+    white_columns = []
 
-    pixels = []
+    for x in range(BAR_WIDTH):
 
-    for x in range(
-        BAR_SCAN_RIGHT - BAR_SCAN_LEFT + 1
-    ):
+        white_count = 0
 
-        color = screenshot.getpixel(
-            (x, 0)
-        )
+        for y in range(BAR_HEIGHT):
+            r, g, b = image.getpixel((x, y))
 
-        pixels.append(
-            (
-                BAR_SCAN_LEFT + x,
-                color
-            )
-        )
+            if r >= 245 and g >= 245 and b >= 245:
+                white_count += 1
 
-    return pixels
+        if white_count >= 2:
+            white_columns.append(x)
 
+    if not white_columns:
+        return None
 
-def summarize_colors(pixels):
+    groups = []
 
-    color_positions = {}
+    start = white_columns[0]
+    previous = white_columns[0]
 
-    for x, color in pixels:
+    for x in white_columns[1:]:
 
-        if color not in color_positions:
+        if x <= previous + 2:
+            previous = x
+        else:
+            groups.append((start, previous))
+            start = x
+            previous = x
 
-            color_positions[color] = []
+    groups.append((start, previous))
 
-        color_positions[color].append(x)
-
-    # Sort colors by number of pixels.
-    sorted_colors = sorted(
-        color_positions.items(),
-        key=lambda item: len(item[1]),
+    # Pick the widest white group
+    groups.sort(
+        key=lambda group: group[1] - group[0],
         reverse=True
     )
 
-    return sorted_colors
+    left, right = groups[0]
+
+    center = (left + right) // 2
+
+    return (
+        BAR_LEFT + left,
+        BAR_LEFT + right,
+        BAR_LEFT + center
+    )
 
 
-def print_scan():
+# ============================================================
+# FIND MOVING COLOR
+# ============================================================
 
-    pixels = scan_bar()
+def is_possible_moving_color(color):
+    """
+    This is intentionally broad.
 
-    colors = summarize_colors(pixels)
+    We are NOT assuming this is definitely the orange
+    rectangle yet. We are just looking for the unusual
+    colored region seen in the scanner results.
+    """
+
+    r, g, b = color
+
+    if not (15 <= r <= 70):
+        return False
+
+    if not (92 <= g <= 180):
+        return False
+
+    if not (110 <= b <= 240):
+        return False
+
+    if b - g < 15:
+        return False
+
+    return True
+
+
+def find_color_candidate(image):
+
+    columns = []
+
+    for x in range(BAR_WIDTH):
+
+        count = 0
+
+        for y in range(BAR_HEIGHT):
+
+            color = image.getpixel((x, y))
+
+            if is_possible_moving_color(color):
+                count += 1
+
+        if count >= 2:
+            columns.append(x)
+
+    if not columns:
+        return None
+
+    groups = []
+
+    start = columns[0]
+    previous = columns[0]
+
+    for x in columns[1:]:
+
+        if x <= previous + 2:
+            previous = x
+        else:
+            groups.append((start, previous))
+            start = x
+            previous = x
+
+    groups.append((start, previous))
+
+    # Ignore tiny groups
+    groups = [
+        group
+        for group in groups
+        if group[1] - group[0] >= 3
+    ]
+
+    if not groups:
+        return None
+
+    # Use the largest candidate
+    groups.sort(
+        key=lambda group: group[1] - group[0],
+        reverse=True
+    )
+
+    left, right = groups[0]
+
+    center = (left + right) // 2
+
+    return (
+        BAR_LEFT + left,
+        BAR_LEFT + right,
+        BAR_LEFT + center
+    )
+
+
+# ============================================================
+# FRAME DIFFERENCE
+# ============================================================
+
+def find_changed_area(previous, current):
+
+    changed_columns = []
+
+    for x in range(BAR_WIDTH):
+
+        changed = 0
+
+        for y in range(BAR_HEIGHT):
+
+            old_pixel = previous.getpixel((x, y))
+            new_pixel = current.getpixel((x, y))
+
+            difference = (
+                abs(old_pixel[0] - new_pixel[0]) +
+                abs(old_pixel[1] - new_pixel[1]) +
+                abs(old_pixel[2] - new_pixel[2])
+            )
+
+            if difference >= 30:
+                changed += 1
+
+        if changed >= 2:
+            changed_columns.append(x)
+
+    if not changed_columns:
+        return None
+
+    groups = []
+
+    start = changed_columns[0]
+    previous_x = changed_columns[0]
+
+    for x in changed_columns[1:]:
+
+        if x <= previous_x + 2:
+            previous_x = x
+        else:
+            groups.append((start, previous_x))
+            start = x
+            previous_x = x
+
+    groups.append((start, previous_x))
+
+    groups = [
+        group
+        for group in groups
+        if group[1] - group[0] >= 3
+    ]
+
+    if not groups:
+        return None
+
+    groups.sort(
+        key=lambda group: group[1] - group[0],
+        reverse=True
+    )
+
+    left, right = groups[0]
+
+    center = (left + right) // 2
+
+    return (
+        BAR_LEFT + left,
+        BAR_LEFT + right,
+        BAR_LEFT + center
+    )
+
+
+# ============================================================
+# TRACKER
+# ============================================================
+
+def track_minigame():
 
     print()
-    print(
-        "--------------------------------"
-    )
-    print("FISHING BAR COLOR SCAN")
-    print(
-        "--------------------------------"
-    )
-
-    print(
-        f"Scanning X={BAR_SCAN_LEFT} "
-        f"to X={BAR_SCAN_RIGHT}"
-    )
-
+    print("======================================")
+    print("TRACKER STARTED")
+    print("NO CLICKS WILL HAPPEN")
+    print("======================================")
     print()
 
-    # Show the most common colors.
-    # This helps identify the background,
-    # orange rectangle, target area, etc.
+    previous_image = None
 
-    for color, positions in colors[:15]:
+    start_time = time.time()
 
-        first_x = positions[0]
-        last_x = positions[-1]
+    while time.time() - start_time < 8:
 
-        print(
-            f"RGB {color} | "
-            f"pixels: {len(positions):3d} | "
-            f"X: {first_x}-{last_x}"
+        current_image = pyautogui.screenshot(
+            region=(
+                BAR_LEFT,
+                BAR_TOP,
+                BAR_WIDTH,
+                BAR_HEIGHT
+            )
         )
 
-    print(
-        "--------------------------------"
-    )
+        target = find_white_target(current_image)
+
+        candidate = find_color_candidate(current_image)
+
+        changed = None
+
+        if previous_image is not None:
+            changed = find_changed_area(
+                previous_image,
+                current_image
+            )
+
+        elapsed = time.time() - start_time
+
+        print(
+            f"[{elapsed:4.1f}s] "
+            f"Target={target} | "
+            f"Color={candidate} | "
+            f"Movement={changed}"
+        )
+
+        previous_image = current_image
+
+        time.sleep(SCAN_DELAY)
+
+    print()
+    print("======================================")
+    print("TRACKER FINISHED")
+    print("======================================")
 
 
 # ============================================================
-# SCANNER
+# MAIN FISH TEST
 # ============================================================
 
-def run_scanner():
-
-    global running
+def test_fishing():
 
     print()
-    print("================================")
-    print("FISHING COLOR SCANNER")
-    print("================================")
-    print()
+    print("Moving to Fish button...")
 
-    print(
-        "The scanner will NOT click "
-        "during the minigame."
-    )
-
-    print()
-
-    # Click Fish
     click_position(
-        FISH_BUTTON,
-        "Fish button"
+        FISH_BUTTON[0],
+        FISH_BUTTON[1]
     )
 
-    if not running:
-        return
-
-    # Wait for minigame
     if not wait_for_minigame():
-
-        running = False
-
-        print()
-        print(
-            "Scanner stopped because "
-            "the minigame was not detected."
-        )
-
         return
 
-    print()
-    print(
-        "MINIGAME FOUND!"
-    )
-
-    print()
-    print(
-        "Keep watching the minigame."
-    )
-
-    print(
-        "The scanner will take several "
-        "samples while the orange "
-        "rectangle moves."
-    )
-
-    print()
-
-    # Take several scans so we can see
-    # how the moving rectangle changes.
-    for scan_number in range(1, 11):
-
-        if not running:
-            break
-
-        print()
-        print(
-            f"========== SCAN "
-            f"{scan_number}/10 =========="
-        )
-
-        print_scan()
-
-        time.sleep(0.25)
-
-    print()
-    print("================================")
-    print("SCANNING FINISHED")
-    print("================================")
-    print()
-
-    print(
-        "Send me the CMD output from "
-        "these scans."
-    )
-
-    running = False
+    track_minigame()
 
 
 # ============================================================
 # HOTKEYS
 # ============================================================
 
-def start_scanner():
+def toggle_macro():
 
     global running
 
     if running:
-
-        print(
-            "Scanner is already running."
-        )
-
+        running = False
+        print()
+        print("Macro STOPPED.")
         return
 
     running = True
 
+    print()
+    print("Macro STARTED.")
+
     threading.Thread(
-        target=run_scanner,
+        target=test_fishing,
         daemon=True
     ).start()
 
@@ -435,41 +477,24 @@ def emergency_stop():
     running = False
 
     print()
-    print(
-        "!!! EMERGENCY STOP !!!"
-    )
-
-
-keyboard.add_hotkey(
-    "f8",
-    start_scanner
-)
-
-keyboard.add_hotkey(
-    "f3",
-    emergency_stop
-)
+    print("EMERGENCY STOP")
 
 
 # ============================================================
 # START
 # ============================================================
 
-print("Sol's Fishing Color Scanner")
+keyboard.add_hotkey("f8", toggle_macro)
+keyboard.add_hotkey("f3", emergency_stop)
+
+print("======================================")
+print("SOLS RNG FISHING TRACKER")
+print("======================================")
+print("F8 = Start")
+print("F3 = Emergency Stop")
 print()
-
-print(
-    "F8 = Start Scanner"
-)
-
-print(
-    "F3 = Emergency Stop"
-)
-
-print()
-
-print(
-    "Ready."
-)
+print("This version DOES NOT click during")
+print("the minigame.")
+print("======================================")
 
 keyboard.wait()
