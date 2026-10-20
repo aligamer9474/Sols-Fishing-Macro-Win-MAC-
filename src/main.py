@@ -1,12 +1,13 @@
 import time
 import ctypes
-import pyautogui
+import ctypes.wintypes
 import keyboard
+import pyautogui
 
 
-# ============================================================
+# =========================
 # SETTINGS
-# ============================================================
+# =========================
 
 FISH_BUTTON_X = 853
 FISH_BUTTON_Y = 832
@@ -17,95 +18,51 @@ RESULT_Y = 342
 MINIGAME_CHECK_X = 1176
 MINIGAME_CHECK_Y = 836
 
-BAR_Y = 767
-BAR_LEFT = 757
-BAR_RIGHT = 1161
-
-CENTER_X = (BAR_LEFT + BAR_RIGHT) // 2
-
 BAR_SAMPLE_X = 955
 BAR_SAMPLE_Y = 767
 
-MINIGAME_WAIT_TIMEOUT = 30.0
-MINIGAME_TIMEOUT = 15.0
+BAR_LEFT = 757
+BAR_RIGHT = 1161
+BAR_Y = 767
 
-FINISH_HIDDEN_TIME = 1.0
-
-CENTER_CLICK_DELAY = 0.20
-FALLBACK_CLICK_DELAY = 0.20
-
+BAR_COLOR_TOLERANCE = 5
+BAR_EDGE_TOLERANCE = 10
 ADVANCED_THRESHOLD = 25
+
+CENTER_X = 959
+CENTER_TOLERANCE = 12
+
+LINE_BRIGHTNESS = 215
+LINE_MIN_HEIGHT = 5
 
 IGNORE_LINE_LEFT = 765
 IGNORE_LINE_RIGHT = 800
 
-IGNORE_LINE_RIGHT_START = 1100
-IGNORE_LINE_RIGHT_END = 1161
+CENTER_FALLBACK_CLICK_INTERVAL = 0.20
+
+MINIGAME_WAIT_TIMEOUT = 15.0
+MINIGAME_TIMEOUT = 12.0
 
 
-# ============================================================
-# WINDOWS INPUT
-# ============================================================
+# =========================
+# WINDOWS MOUSE
+# =========================
 
 user32 = ctypes.windll.user32
 
 MOUSEEVENTF_MOVE = 0x0001
-
-
-class POINT(ctypes.Structure):
-    _fields_ = [
-        ("x", ctypes.c_long),
-        ("y", ctypes.c_long)
-    ]
-
-
-# SendInput structures
-ULONG_PTR = ctypes.c_ulonglong
-
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ULONG_PTR)
-    ]
-
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [
-        ("mi", MOUSEINPUT)
-    ]
-
-
-class INPUT(ctypes.Structure):
-    _anonymous_ = ("union",)
-    _fields_ = [
-        ("type", ctypes.c_ulong),
-        ("union", INPUT_UNION)
-    ]
-
-
-INPUT_MOUSE = 0
-
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
 
 def get_mouse_position():
-    point = POINT()
-
+    point = ctypes.wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(point))
-
     return point.x, point.y
 
 
 def move_mouse_native(target_x, target_y):
-
-    while True:
-
+    while running and not emergency_stop:
         current_x, current_y = get_mouse_position()
 
         dx = target_x - current_x
@@ -114,19 +71,8 @@ def move_mouse_native(target_x, target_y):
         if abs(dx) <= 1 and abs(dy) <= 1:
             break
 
-        if dx > 3:
-            move_x = 3
-        elif dx < -3:
-            move_x = -3
-        else:
-            move_x = dx
-
-        if dy > 3:
-            move_y = 3
-        elif dy < -3:
-            move_y = -3
-        else:
-            move_y = dy
+        move_x = max(-3, min(3, dx))
+        move_y = max(-3, min(3, dy))
 
         user32.mouse_event(
             MOUSEEVENTF_MOVE,
@@ -139,58 +85,43 @@ def move_mouse_native(target_x, target_y):
         time.sleep(0.004)
 
 
-def send_mouse_input(flags):
-
-    mouse_input = MOUSEINPUT(
+def native_click():
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTDOWN,
         0,
         0,
-        0,
-        flags,
         0,
         0
     )
 
-    input_data = INPUT(
-        type=INPUT_MOUSE,
-        mi=mouse_input
+    time.sleep(0.01)
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        0
     )
 
-    result = user32.SendInput(
-        1,
-        ctypes.byref(input_data),
-        ctypes.sizeof(INPUT)
-    )
 
-    return result == 1
-
-
-def click_native():
-
-    # Windows native click using SendInput.
-    send_mouse_input(MOUSEEVENTF_LEFTDOWN)
-
-    time.sleep(0.015)
-
-    send_mouse_input(MOUSEEVENTF_LEFTUP)
-
-
-# ============================================================
+# =========================
 # GLOBAL STATE
-# ============================================================
+# =========================
 
 running = False
-stop_requested = False
+emergency_stop = False
+cycle_count = 0
 
 
-# ============================================================
+# =========================
 # HOTKEYS
-# ============================================================
+# =========================
 
 def toggle_macro():
-
     global running
 
-    if stop_requested:
+    if emergency_stop:
         return
 
     running = not running
@@ -201,97 +132,69 @@ def toggle_macro():
         print("\n[STATUS] PAUSED")
 
 
-def emergency_stop():
+def emergency_stop_macro():
+    global running
+    global emergency_stop
 
-    global running, stop_requested
-
+    emergency_stop = True
     running = False
-    stop_requested = True
 
     print("\n[EMERGENCY STOP]")
 
 
 keyboard.add_hotkey("f8", toggle_macro)
-keyboard.add_hotkey("f3", emergency_stop)
+keyboard.add_hotkey("f3", emergency_stop_macro)
 
 
-# ============================================================
+# =========================
 # COLOR FUNCTIONS
-# ============================================================
+# =========================
 
 def get_pixel(x, y):
-
-    try:
-        return pyautogui.pixel(x, y)
-    except Exception:
-        return None
+    screenshot = pyautogui.screenshot()
+    return screenshot.getpixel((x, y))
 
 
-def color_matches(color1, color2, tolerance=10):
-
-    if color1 is None or color2 is None:
-        return False
+def is_white(color):
+    r, g, b = color
 
     return (
-        abs(color1[0] - color2[0]) <= tolerance
-        and
-        abs(color1[1] - color2[1]) <= tolerance
-        and
-        abs(color1[2] - color2[2]) <= tolerance
+        r >= 240 and
+        g >= 240 and
+        b >= 240
     )
 
 
-# ============================================================
-# BAR COLOR
-# ============================================================
+def color_matches(color, target, tolerance):
+    r1, g1, b1 = color
+    r2, g2, b2 = target
 
-def get_bar_color():
-
-    color = get_pixel(
-        BAR_SAMPLE_X,
-        BAR_SAMPLE_Y
+    return (
+        abs(r1 - r2) <= tolerance and
+        abs(g1 - g2) <= tolerance and
+        abs(b1 - b2) <= tolerance
     )
 
-    if color is not None:
 
-        print(
-            f"BAR COLOR: "
-            f"({color[0]}, {color[1]}, {color[2]})"
-        )
+# =========================
+# FIND RECTANGLE
+# =========================
 
-        return color
-
-    return None
-
-
-# ============================================================
-# RECTANGLE DETECTION
-# ============================================================
-
-def find_rectangle(bar_color):
-
-    if bar_color is None:
-        return None
+def find_bar(bar_color):
+    screenshot = pyautogui.screenshot()
 
     left_x = None
-    right_x = None
 
-    for x in range(
-        BAR_LEFT,
-        BAR_RIGHT + 1
-    ):
-
-        color = get_pixel(
-            x,
-            BAR_Y
+    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+        color = screenshot.getpixel(
+            (x, BAR_Y)
         )
 
         if color_matches(
             color,
             bar_color,
-            5
+            BAR_COLOR_TOLERANCE
         ):
-
             left_x = x
             break
 
@@ -300,139 +203,152 @@ def find_rectangle(bar_color):
 
     right_x = left_x
 
-    for x in range(
-        left_x + 1,
-        BAR_RIGHT + 1
-    ):
+    while right_x < BAR_RIGHT:
+        test_x = right_x + 1
 
-        color = get_pixel(
-            x,
-            BAR_Y
+        color = screenshot.getpixel(
+            (test_x, BAR_Y)
         )
 
         if color_matches(
             color,
             bar_color,
-            10
+            BAR_EDGE_TOLERANCE
         ):
-
-            right_x = x
-
+            right_x = test_x
         else:
             break
 
-    width = right_x - left_x
-
-    return left_x, right_x, width
+    return left_x, right_x
 
 
-# ============================================================
-# PLAYER LINE DETECTION
-# ============================================================
+# =========================
+# FIND PLAYER LINE
+# =========================
 
 def find_player_line():
+    screenshot = pyautogui.screenshot()
 
-    for x in range(
-        BAR_LEFT,
-        BAR_RIGHT + 1
-    ):
+    candidates = []
 
-        if (
-            IGNORE_LINE_LEFT
-            <= x
-            <= IGNORE_LINE_RIGHT
-        ):
+    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+
+        if IGNORE_LINE_LEFT <= x <= IGNORE_LINE_RIGHT:
             continue
 
-        if (
-            IGNORE_LINE_RIGHT_START
-            <= x
-            <= IGNORE_LINE_RIGHT_END
-        ):
-            continue
+        bright_count = 0
 
-        for y in range(
-            BAR_Y - 5,
-            BAR_Y + 6
-        ):
-
-            color = get_pixel(
-                x,
-                y
+        for y in range(750, 785):
+            r, g, b = screenshot.getpixel(
+                (x, y)
             )
 
-            if color is None:
-                continue
-
-            r, g, b = color
-
             if (
-                r >= 210
-                and
-                g >= 210
-                and
-                b >= 210
+                r >= LINE_BRIGHTNESS and
+                g >= LINE_BRIGHTNESS and
+                b >= LINE_BRIGHTNESS
             ):
+                bright_count += 1
 
-                return x
+        if bright_count >= LINE_MIN_HEIGHT:
+            candidates.append(x)
 
-    return None
+    if not candidates:
+        return None
+
+    groups = []
+    current_group = [candidates[0]]
+
+    for x in candidates[1:]:
+        if x <= current_group[-1] + 2:
+            current_group.append(x)
+        else:
+            groups.append(current_group)
+            current_group = [x]
+
+    groups.append(current_group)
+
+    strongest = max(
+        groups,
+        key=len
+    )
+
+    return (
+        strongest[0] +
+        strongest[-1]
+    ) // 2
 
 
-# ============================================================
-# MINIGAME START
-# ============================================================
+# =========================
+# FALLBACK LINE CONTROL
+# =========================
+
+def center_fallback(line_x, last_click):
+
+    if line_x is None:
+        return last_click
+
+    distance = line_x - CENTER_X
+
+    # LEFT
+    if distance < -CENTER_TOLERANCE:
+        native_click()
+
+        print(
+            f"LINE LEFT: {line_x} "
+            f"(distance {distance}) -> CLICK"
+        )
+
+        return time.monotonic()
+
+    # RIGHT
+    if distance > CENTER_TOLERANCE:
+        print(
+            f"LINE RIGHT: {line_x} "
+            f"(distance +{distance}) -> NO CLICK"
+        )
+
+        return last_click
+
+    # CENTER
+    now = time.monotonic()
+
+    if now - last_click >= CENTER_FALLBACK_CLICK_INTERVAL:
+        native_click()
+
+        print(
+            f"LINE CENTER: {line_x} "
+            f"(distance {distance}) -> CLICK"
+        )
+
+        return now
+
+    return last_click
+
+
+# =========================
+# WAIT FOR MINIGAME
+# =========================
 
 def wait_for_minigame():
 
     print("WAITING FOR MINIGAME...")
 
-    start_time = time.time()
+    start = time.monotonic()
 
-    while (
-        running
-        and
-        not stop_requested
-    ):
+    while running and not emergency_stop:
 
         color = get_pixel(
             MINIGAME_CHECK_X,
             MINIGAME_CHECK_Y
         )
 
-        if color is not None:
+        if is_white(color):
+            print("MINIGAME DETECTED")
+            return True
 
-            r, g, b = color
-
-            if (
-                r >= 230
-                and
-                g >= 230
-                and
-                b >= 230
-            ):
-
-                print("MINIGAME DETECTED")
-
-                move_mouse_native(
-                    950,
-                    880
-                )
-
-                time.sleep(0.05)
-
-                return True
-
-        if (
-            time.time() - start_time
-            >= MINIGAME_WAIT_TIMEOUT
-        ):
-
-            print(
-                f"MINIGAME NOT FOUND AFTER "
-                f"{MINIGAME_WAIT_TIMEOUT:.0f} SECONDS"
-            )
-
+        if time.monotonic() - start >= MINIGAME_WAIT_TIMEOUT:
+            print("MINIGAME WAIT TIMEOUT")
             return False
 
         time.sleep(0.05)
@@ -440,229 +356,196 @@ def wait_for_minigame():
     return False
 
 
-# ============================================================
+# =========================
 # FISHING MINIGAME
-# ============================================================
+# =========================
 
 def run_fishing_minigame():
 
-    print("GETTING BAR COLOR...")
-
-    bar_color = get_bar_color()
-
-    if bar_color is None:
-
-        print(
-            "COULD NOT GET BAR COLOR"
-        )
-
+    if not wait_for_minigame():
         return False
 
-    print("BAR COLOR READY")
+    # Move to bar once
+    move_mouse_native(
+        950,
+        880
+    )
 
-    start_time = time.time()
+    time.sleep(0.05)
 
-    bar_hidden_since = None
+    bar_color = get_pixel(
+        BAR_SAMPLE_X,
+        BAR_SAMPLE_Y
+    )
 
+    print(
+        f"BAR COLOR: {bar_color}"
+    )
+
+    start = time.monotonic()
+
+    last_fallback_click = 0.0
+
+    # Prevents repeated clicks while
+    # the rectangle remains centered.
     rectangle_center_clicked = False
 
-    last_fallback_click = 0
+    while running and not emergency_stop:
 
-    while (
-        running
-        and
-        not stop_requested
-    ):
+        if time.monotonic() - start >= MINIGAME_TIMEOUT:
+            print("MINIGAME TIMEOUT")
+            break
 
-        if (
-            time.time() - start_time
-            >= MINIGAME_TIMEOUT
-        ):
+        bar = find_bar(bar_color)
+
+        # =========================
+        # RECTANGLE DETECTED
+        # =========================
+
+        if bar is not None:
+
+            left_x, right_x = bar
+
+            width = right_x - left_x
+
+            center = (
+                left_x + right_x
+            ) // 2
 
             print(
-                "MINIGAME TIMEOUT"
+                f"BAR FOUND: "
+                f"{left_x}-{right_x} "
+                f"Width={width} "
+                f"Center={center}"
             )
-
-            return False
-
-        rectangle = find_rectangle(
-            bar_color
-        )
-
-        # ====================================================
-        # RECTANGLE FOUND
-        # ====================================================
-
-        if rectangle is not None:
-
-            left_x, right_x, width = rectangle
-
-            bar_hidden_since = None
-
-            # -----------------------------------------------
-            # RECTANGLE CENTERED
-            # -----------------------------------------------
-
-            if (
-                left_x
-                <= CENTER_X
-                <= right_x
-            ):
-
-                if not rectangle_center_clicked:
-
-                    click_native()
-
-                    print(
-                        f"RECTANGLE CENTERED "
-                        f"({left_x}-{right_x}) "
-                        f"-> CLICK"
-                    )
-
-                    rectangle_center_clicked = True
-
-                time.sleep(0.01)
-
-                continue
-
-            # -----------------------------------------------
-            # RECTANGLE MOVED AWAY
-            # -----------------------------------------------
-
-            rectangle_center_clicked = False
 
             if width < ADVANCED_THRESHOLD:
 
-                click_native()
+                # Rectangle is touching
+                # the center position.
+                if left_x <= CENTER_X <= right_x:
 
+                    if not rectangle_center_clicked:
+
+                        native_click()
+
+                        print(
+                            "RECTANGLE CENTER "
+                            "-> CLICK ONCE"
+                        )
+
+                        rectangle_center_clicked = True
+
+                    else:
+
+                        print(
+                            "RECTANGLE CENTER "
+                            "-> NO CLICK"
+                        )
+
+                else:
+
+                    # Rectangle moved away,
+                    # so allow another center click
+                    # the next time it reaches center.
+                    rectangle_center_clicked = False
+
+                    native_click()
+
+                    print(
+                        "RECTANGLE NOT CENTER "
+                        "-> NORMAL CLICK"
+                    )
+
+            else:
+
+                rectangle_center_clicked = False
+
+                # Do nothing when the rectangle
+                # is too wide.
                 print(
-                    f"RECTANGLE WIDTH "
-                    f"{width} -> CLICK"
+                    "RECTANGLE TOO WIDE "
+                    "-> NO CLICK"
                 )
 
-                time.sleep(0.025)
-
-            time.sleep(0.01)
-
-            continue
-
-        # ====================================================
-        # RECTANGLE NOT FOUND
-        # ====================================================
-
-        if bar_hidden_since is None:
-
-            bar_hidden_since = time.time()
-
-        line_x = find_player_line()
-
-        # ====================================================
-        # BOTH HIDDEN = FINISHED
-        # ====================================================
-
-        if line_x is None:
-
-            if (
-                time.time()
-                - bar_hidden_since
-                >= FINISH_HIDDEN_TIME
-            ):
-
-                print(
-                    "BAR + LINE HIDDEN "
-                    "-> MINIGAME FINISHED"
-                )
-
-                return True
-
-            time.sleep(0.01)
-
-            continue
-
-        # ====================================================
-        # LINE LEFT
-        # ====================================================
-
-        if line_x < CENTER_X - 15:
-
-            now = time.time()
-
-            if (
-                now - last_fallback_click
-                >= FALLBACK_CLICK_DELAY
-            ):
-
-                click_native()
-
-                last_fallback_click = now
-
-                print(
-                    f"FALLBACK LINE LEFT "
-                    f"x={line_x} -> CLICK"
-                )
-
-        # ====================================================
-        # LINE RIGHT
-        # ====================================================
-
-        elif line_x > CENTER_X + 15:
-
-            pass
-
-        # ====================================================
-        # LINE CENTER
-        # ====================================================
+        # =========================
+        # RECTANGLE HIDDEN
+        # =========================
 
         else:
 
-            now = time.time()
+            print(
+                "BAR HIDDEN -> LINE FALLBACK"
+            )
 
-            if (
-                now - last_fallback_click
-                >= CENTER_CLICK_DELAY
-            ):
+            line_x = find_player_line()
 
-                click_native()
-
-                last_fallback_click = now
+            if line_x is None:
 
                 print(
-                    f"FALLBACK LINE CENTER "
-                    f"x={line_x} -> CLICK"
+                    "LINE HIDDEN -> NO CLICK"
+                )
+
+            else:
+
+                print(
+                    f"LINE FOUND: {line_x}"
+                )
+
+                last_fallback_click = (
+                    center_fallback(
+                        line_x,
+                        last_fallback_click
+                    )
                 )
 
         time.sleep(0.01)
 
-    return False
+    # =========================
+    # FISH RESULT
+    # =========================
+
+    if running and not emergency_stop:
+
+        time.sleep(0.30)
+
+        move_mouse_native(
+            RESULT_X,
+            RESULT_Y
+        )
+
+        time.sleep(0.70)
+
+        native_click()
+
+        time.sleep(0.30)
+
+    return True
 
 
-# ============================================================
-# FISHING LOOP
-# ============================================================
+# =========================
+# MAIN LOOP
+# =========================
 
 def fishing_loop():
 
+    global cycle_count
     global running
 
-    cycle = 0
+    while not emergency_stop:
 
-    while (
-        running
-        and
-        not stop_requested
-    ):
+        if not running:
+            time.sleep(0.1)
+            continue
 
-        cycle += 1
+        cycle_count += 1
 
-        print()
         print(
-            f"========== CYCLE {cycle} =========="
+            f"\n========== CYCLE "
+            f"{cycle_count} =========="
         )
 
-        # ----------------------------------------------------
-        # FISH BUTTON
-        # ----------------------------------------------------
-
+        # Go to Fish button
         move_mouse_native(
             FISH_BUTTON_X,
             FISH_BUTTON_Y
@@ -670,77 +553,39 @@ def fishing_loop():
 
         time.sleep(0.05)
 
-        click_native()
+        # Click Fish ONCE
+        native_click()
 
         print(
             "FISH BUTTON CLICKED"
         )
 
-        # ----------------------------------------------------
-        # WAIT FOR MINIGAME
-        # ----------------------------------------------------
+        # Give Roblox time to react
+        time.sleep(0.50)
 
-        if not wait_for_minigame():
+        # Wait for minigame
+        success = run_fishing_minigame()
 
-            if stop_requested:
-                break
+        if not success:
 
             print(
                 "MINIGAME DID NOT START."
             )
 
-            running = False
-
-            break
-
-        # ----------------------------------------------------
-        # MINIGAME
-        # ----------------------------------------------------
-
-        caught = run_fishing_minigame()
-
-        if stop_requested:
-            break
-
-        if not caught:
-
             print(
-                "MINIGAME FAILED."
+                "MACRO PAUSED."
             )
 
             running = False
 
-            break
+            continue
 
-        # ----------------------------------------------------
-        # FISH CAUGHT
-        # ----------------------------------------------------
-
-        print(
-            "FISH CAUGHT"
-        )
-
-        time.sleep(0.50)
-
-        move_mouse_native(
-            RESULT_X,
-            RESULT_Y
-        )
-
-        time.sleep(0.05)
-
-        click_native()
-
-        print(
-            "RESULT X CLICKED"
-        )
-
-        time.sleep(0.30)
+        time.sleep(0.20)
 
 
-# ============================================================
-# MAIN
-# ============================================================
+# =========================
+# START
+# =========================
 
 print("================================")
 print(" SOL'S RNG FISHING MACRO")
@@ -752,24 +597,14 @@ print("================================")
 
 try:
 
-    while not stop_requested:
-
-        if running:
-
-            fishing_loop()
-
-        time.sleep(0.05)
+    fishing_loop()
 
 except KeyboardInterrupt:
 
-    print(
-        "\n[STOPPED]"
-    )
+    running = False
+    print("\nMacro stopped.")
 
-finally:
+except Exception as e:
 
     running = False
-
-    print(
-        "\nMACRO CLOSED"
-    )
+    print(f"\nERROR: {e}")
