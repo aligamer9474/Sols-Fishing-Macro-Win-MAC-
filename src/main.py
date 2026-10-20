@@ -21,22 +21,20 @@ BAR_SAMPLE = (955, 767)
 
 ADVANCED_THRESHOLD = 25
 
-# Slows down repeated clicks.
-# The old macro used about 0.025 seconds.
 CLICK_COOLDOWN = 0.15
 
-# How long to watch each fishing minigame.
 MINIGAME_TIMEOUT = 9.0
 
-# Timing from the old macro.
 RESULT_WAIT = 0.30
 RESULT_CLOSE_WAIT = 0.70
+
 
 # ============================================================
 # WINDOWS MOUSE
 # ============================================================
 
 user32 = ctypes.windll.user32
+gdi32 = ctypes.windll.gdi32
 
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
@@ -77,12 +75,9 @@ def native_click():
 
 
 def move_mouse_smooth(target_x, target_y):
-    """
-    Uses relative Windows mouse movement.
-    This is the method that Roblox successfully recognized.
-    """
 
     while True:
+
         current_x, current_y = get_mouse_position()
 
         dx = target_x - current_x
@@ -110,14 +105,11 @@ def move_mouse_smooth(target_x, target_y):
 # ============================================================
 
 def get_pixel(x, y):
-    """
-    Gets a screen pixel using Windows.
-    Returns RGB tuple.
-    """
 
     hdc = user32.GetDC(0)
 
-    color = user32.GetPixel(
+    # GetPixel belongs to gdi32, NOT user32.
+    color = gdi32.GetPixel(
         hdc,
         x,
         y
@@ -125,7 +117,7 @@ def get_pixel(x, y):
 
     user32.ReleaseDC(0, hdc)
 
-    if color == -1:
+    if color == 0xFFFFFFFF:
         return None
 
     r = color & 0xFF
@@ -136,6 +128,7 @@ def get_pixel(x, y):
 
 
 def color_matches(color1, color2, tolerance=5):
+
     if color1 is None or color2 is None:
         return False
 
@@ -149,18 +142,11 @@ def color_matches(color1, color2, tolerance=5):
 
 
 def find_bar(bar_color):
-    """
-    Searches the same horizontal row used by the old macro.
-
-    Returns:
-        (left_x, right_x, width)
-    or:
-        None
-    """
 
     left_x = None
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
+
         pixel = get_pixel(x, BAR_Y)
 
         if color_matches(pixel, bar_color, 5):
@@ -173,6 +159,7 @@ def find_bar(bar_color):
     right_x = left_x
 
     for x in range(left_x + 1, BAR_RIGHT + 1):
+
         pixel = get_pixel(x, BAR_Y)
 
         if color_matches(pixel, bar_color, 10):
@@ -190,6 +177,7 @@ def find_bar(bar_color):
 # ============================================================
 
 def wait_for_minigame():
+
     print("Waiting for minigame...")
 
     start_time = time.time()
@@ -208,7 +196,12 @@ def wait_for_minigame():
         elapsed = time.time() - start_time
 
         if elapsed - last_report >= 5:
-            print(f"Still waiting... {elapsed:.1f}s")
+
+            print(
+                f"Still waiting... "
+                f"{elapsed:.1f}s"
+            )
+
             last_report = elapsed
 
         time.sleep(0.01)
@@ -227,12 +220,24 @@ def fishing_minigame():
     print("FISHING MINIGAME")
     print("OLD MACRO DETECTION - SLOWED")
     print("======================================")
-    print(f"Fishing line: X={BAR_LEFT}-{BAR_RIGHT}, Y={BAR_Y}")
-    print(f"Advanced threshold: {ADVANCED_THRESHOLD}")
-    print(f"Click cooldown: {CLICK_COOLDOWN}s")
+
+    print(
+        f"Fishing line: "
+        f"X={BAR_LEFT}-{BAR_RIGHT}, Y={BAR_Y}"
+    )
+
+    print(
+        f"Advanced threshold: "
+        f"{ADVANCED_THRESHOLD}"
+    )
+
+    print(
+        f"Click cooldown: "
+        f"{CLICK_COOLDOWN}s"
+    )
 
     # --------------------------------------------------------
-    # Sample the bar color exactly like the old macro.
+    # Sample bar color
     # --------------------------------------------------------
 
     time.sleep(0.05)
@@ -243,12 +248,16 @@ def fishing_minigame():
     )
 
     if bar_color is None:
+
         print("Could not read bar color.")
+
         return False
 
     print(
         f"Bar color learned: "
-        f"RGB({bar_color[0]}, {bar_color[1]}, {bar_color[2]})"
+        f"RGB({bar_color[0]}, "
+        f"{bar_color[1]}, "
+        f"{bar_color[2]})"
     )
 
     start_time = time.time()
@@ -259,8 +268,6 @@ def fishing_minigame():
 
     last_click_time = 0
 
-    # Prevent repeatedly clicking the exact same bar
-    # while the screen has not meaningfully changed.
     last_bar_left = None
     last_bar_right = None
 
@@ -286,18 +293,6 @@ def fishing_minigame():
 
             current_time = time.time()
 
-            # ------------------------------------------------
-            # Only click when:
-            #
-            # 1. The bar is newly detected, OR
-            # 2. The bar has moved enough,
-            # AND
-            # 3. Cooldown has expired.
-            #
-            # This stops the same 939-959 bar from causing
-            # 6+ clicks in a row.
-            # ------------------------------------------------
-
             bar_moved = (
                 last_bar_left is None
                 or
@@ -314,13 +309,9 @@ def fishing_minigame():
             should_click = False
 
             if width < ADVANCED_THRESHOLD:
+
                 if bar_moved and cooldown_ready:
                     should_click = True
-
-            # If the bar disappears completely, the old macro
-            # clicked. We DO NOT panic spam here.
-            #
-            # The last known state is retained instead.
 
             if should_click:
 
@@ -329,14 +320,15 @@ def fishing_minigame():
                 total_clicks += 1
                 last_click_time = current_time
 
-                print(f"CLICK #{total_clicks}")
+                print(
+                    f"CLICK #{total_clicks}"
+                )
 
                 last_bar_left = left_x
                 last_bar_right = right_x
 
             else:
-                # Remember where the bar currently is even if
-                # we did not click it.
+
                 last_bar_left = left_x
                 last_bar_right = right_x
 
@@ -344,14 +336,25 @@ def fishing_minigame():
 
             missed_scans += 1
 
-        # Small scan delay.
         time.sleep(0.01)
 
     print()
     print("Fishing detection finished.")
-    print(f"Bar detections: {detections}")
-    print(f"Missed scans: {missed_scans}")
-    print(f"Total clicks: {total_clicks}")
+
+    print(
+        f"Bar detections: "
+        f"{detections}"
+    )
+
+    print(
+        f"Missed scans: "
+        f"{missed_scans}"
+    )
+
+    print(
+        f"Total clicks: "
+        f"{total_clicks}"
+    )
 
     return running
 
@@ -366,11 +369,16 @@ def fishing_cycle():
 
     print()
     print("======================================")
-    print(f"FISHING CYCLE #{cycle_count + 1}")
+
+    print(
+        f"FISHING CYCLE "
+        f"#{cycle_count + 1}"
+    )
+
     print("======================================")
 
     # --------------------------------------------------------
-    # Move to Fish button.
+    # Fish button
     # --------------------------------------------------------
 
     print("Moving to Fish button...")
@@ -393,7 +401,7 @@ def fishing_cycle():
     native_click()
 
     # --------------------------------------------------------
-    # Wait for minigame.
+    # Wait for minigame
     # --------------------------------------------------------
 
     if not wait_for_minigame():
@@ -405,11 +413,9 @@ def fishing_cycle():
     )
 
     # --------------------------------------------------------
-    # Move to the old sample position before detection.
+    # Move to old sample position.
     #
-    # IMPORTANT:
-    # The mouse stays here during the actual minigame.
-    # We do NOT move it with the bar.
+    # The mouse stays here during the minigame.
     # --------------------------------------------------------
 
     move_mouse_smooth(
@@ -426,7 +432,7 @@ def fishing_cycle():
         return False
 
     # --------------------------------------------------------
-    # Fish-result X
+    # Fish result X
     # --------------------------------------------------------
 
     print()
@@ -456,6 +462,7 @@ def fishing_cycle():
     cycle_count += 1
 
     print("Fish-result X clicked.")
+
     print(
         f"Cycle complete! "
         f"Total cycles: {cycle_count}"
@@ -496,9 +503,12 @@ def toggle_macro():
     global macro_thread
 
     if running:
+
         running = False
+
         print()
         print("Macro PAUSED.")
+
         return
 
     running = True
@@ -546,11 +556,22 @@ keyboard.add_hotkey(
 print("======================================")
 print("SOLS RNG FISHING MACRO")
 print("======================================")
+
 print("F8 = Start / Pause")
 print("F3 = Emergency Stop")
+
 print()
-print(f"Fish button: {FISH_BUTTON}")
-print(f"Result X: {FISH_RESULT_CLOSE}")
+
+print(
+    f"Fish button: "
+    f"{FISH_BUTTON}"
+)
+
+print(
+    f"Result X: "
+    f"{FISH_RESULT_CLOSE}"
+)
+
 print()
 print("Ready.")
 
