@@ -19,12 +19,11 @@ BAR_LEFT = 757
 BAR_RIGHT = 1161
 BAR_Y = 767
 
-# Vertical area used to find the bar when the timer
-# covers the original horizontal detection line.
+# Extra vertical scan area
 BAR_SCAN_TOP = 755
 BAR_SCAN_BOTTOM = 780
 
-# Old macro's advanced fishing threshold
+# Old macro advanced threshold
 ADVANCED_FISHING_THRESHOLD = 25
 
 COLOR_SAMPLE_DELAY = 0.050
@@ -32,18 +31,32 @@ SCAN_DELAY = 0.010
 
 COLOR_TOLERANCE = 10
 
-# Prevent instant re-triggering after a click
+# Prevent instant re-triggering
 REARM_DELAY = 0.08
 
 # Panic click cooldown
-MISSING_COLOR_COOLDOWN = 0.50
+MISSING_COLOR_COOLDOWN = 0.40
 
-# Maximum amount of time to blindly panic-click
-# before giving up on panic mode.
+# How long panic mode is allowed to click
 PANIC_MAX_TIME = 2.0
 
-# Wait before clicking the fish-result X
-RESULT_CLOSE_DELAY = 0.50
+# Delay before closing fish result
+RESULT_CLOSE_DELAY = 0.40
+
+# ------------------------------------------------------------
+# IMPORTANT:
+# The rectangle ALWAYS starts in the middle.
+#
+# We don't allow panic mode immediately after the minigame
+# starts. The rectangle must first move away from its starting
+# position before panic detection can become active.
+# ------------------------------------------------------------
+
+INITIAL_GRACE_PERIOD = 1.20
+
+# Rectangle must be seen at a different position before
+# panic mode is allowed.
+MOVEMENT_REQUIRED = 12
 
 
 # ============================================================
@@ -58,28 +71,47 @@ MOUSEEVENTF_LEFTUP = 0x0004
 
 
 def get_mouse_position():
+
     point = wintypes.POINT()
-    user32.GetCursorPos(ctypes.byref(point))
+
+    user32.GetCursorPos(
+        ctypes.byref(point)
+    )
+
     return point.x, point.y
 
 
 def move_mouse_native(x, y):
+
     current_x, current_y = get_mouse_position()
 
     dx = x - current_x
     dy = y - current_y
 
-    distance = max(abs(dx), abs(dy))
+    distance = max(
+        abs(dx),
+        abs(dy)
+    )
 
     if distance == 0:
         return
 
-    steps = max(1, int(distance / 8))
+    steps = max(
+        1,
+        int(distance / 8)
+    )
 
     for i in range(1, steps + 1):
 
-        target_x = current_x + int(dx * i / steps)
-        target_y = current_y + int(dy * i / steps)
+        target_x = (
+            current_x
+            + int(dx * i / steps)
+        )
+
+        target_y = (
+            current_y
+            + int(dy * i / steps)
+        )
 
         last_x, last_y = get_mouse_position()
 
@@ -98,6 +130,7 @@ def move_mouse_native(x, y):
 
 
 def native_click():
+
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -131,14 +164,20 @@ current_bar_color = None
 # COLOR FUNCTIONS
 # ============================================================
 
-def colors_match(c1, c2, tolerance=COLOR_TOLERANCE):
+def colors_match(
+    c1,
+    c2,
+    tolerance=COLOR_TOLERANCE
+):
 
     if c1 is None or c2 is None:
         return False
 
     return (
-        abs(c1[0] - c2[0]) <= tolerance and
-        abs(c1[1] - c2[1]) <= tolerance and
+        abs(c1[0] - c2[0]) <= tolerance
+        and
+        abs(c1[1] - c2[1]) <= tolerance
+        and
         abs(c1[2] - c2[2]) <= tolerance
     )
 
@@ -149,8 +188,10 @@ def is_white(color):
         return False
 
     return (
-        color[0] > 245 and
-        color[1] > 245 and
+        color[0] > 245
+        and
+        color[1] > 245
+        and
         color[2] > 245
     )
 
@@ -161,8 +202,10 @@ def is_dark(color):
         return True
 
     return (
-        color[0] < 10 and
-        color[1] < 10 and
+        color[0] < 10
+        and
+        color[1] < 10
+        and
         color[2] < 10
     )
 
@@ -176,25 +219,46 @@ def get_bar_color():
     screenshot = pyautogui.screenshot()
 
     # Exact pixel used by the old macro
-    color = screenshot.getpixel((955, BAR_Y))
+    color = screenshot.getpixel(
+        (955, BAR_Y)
+    )
 
-    if not is_white(color) and not is_dark(color):
+    if (
+        not is_white(color)
+        and
+        not is_dark(color)
+    ):
         return color
 
     # Nearby pixels
     for x in range(945, 966):
 
-        color = screenshot.getpixel((x, BAR_Y))
+        color = screenshot.getpixel(
+            (x, BAR_Y)
+        )
 
-        if not is_white(color) and not is_dark(color):
+        if (
+            not is_white(color)
+            and
+            not is_dark(color)
+        ):
             return color
 
-    # Entire bar fallback
-    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+    # Full bar fallback
+    for x in range(
+        BAR_LEFT,
+        BAR_RIGHT + 1
+    ):
 
-        color = screenshot.getpixel((x, BAR_Y))
+        color = screenshot.getpixel(
+            (x, BAR_Y)
+        )
 
-        if not is_white(color) and not is_dark(color):
+        if (
+            not is_white(color)
+            and
+            not is_dark(color)
+        ):
             return color
 
     return None
@@ -214,11 +278,19 @@ def find_bar():
     start_x = None
     end_x = None
 
-    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+    for x in range(
+        BAR_LEFT,
+        BAR_RIGHT + 1
+    ):
 
-        color = screenshot.getpixel((x, BAR_Y))
+        color = screenshot.getpixel(
+            (x, BAR_Y)
+        )
 
-        if colors_match(color, current_bar_color):
+        if colors_match(
+            color,
+            current_bar_color
+        ):
 
             if start_x is None:
                 start_x = x
@@ -230,20 +302,24 @@ def find_bar():
             if start_x is not None:
                 break
 
-    if start_x is None or end_x is None:
+    if (
+        start_x is None
+        or
+        end_x is None
+    ):
         return None
 
     width = end_x - start_x
 
-    return start_x, end_x, width
+    return (
+        start_x,
+        end_x,
+        width
+    )
 
 
 # ============================================================
 # 2D BAR DETECTION
-#
-# This is used when the timer covers the original line.
-# Instead of checking only y=767, it checks several pixels
-# vertically around the fishing bar.
 # ============================================================
 
 def find_bar_2d():
@@ -255,26 +331,34 @@ def find_bar_2d():
 
     matching_x = []
 
-    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+    for x in range(
+        BAR_LEFT,
+        BAR_RIGHT + 1
+    ):
 
         match_count = 0
 
-        for y in range(BAR_SCAN_TOP, BAR_SCAN_BOTTOM + 1):
+        for y in range(
+            BAR_SCAN_TOP,
+            BAR_SCAN_BOTTOM + 1
+        ):
 
-            color = screenshot.getpixel((x, y))
+            color = screenshot.getpixel(
+                (x, y)
+            )
 
-            if colors_match(color, current_bar_color):
+            if colors_match(
+                color,
+                current_bar_color
+            ):
                 match_count += 1
 
-        # Require multiple matching pixels vertically.
-        # This helps avoid random single-pixel matches.
         if match_count >= 2:
             matching_x.append(x)
 
     if not matching_x:
         return None
 
-    # Find the largest contiguous horizontal section.
     groups = []
 
     group_start = matching_x[0]
@@ -283,27 +367,43 @@ def find_bar_2d():
     for x in matching_x[1:]:
 
         if x <= group_end + 1:
+
             group_end = x
 
         else:
-            groups.append((group_start, group_end))
+
+            groups.append(
+                (
+                    group_start,
+                    group_end
+                )
+            )
 
             group_start = x
             group_end = x
 
-    groups.append((group_start, group_end))
+    groups.append(
+        (
+            group_start,
+            group_end
+        )
+    )
 
-    # Choose the widest group.
     best_group = max(
         groups,
-        key=lambda group: group[1] - group[0]
+        key=lambda group:
+        group[1] - group[0]
     )
 
     start_x, end_x = best_group
 
     width = end_x - start_x
 
-    return start_x, end_x, width
+    return (
+        start_x,
+        end_x,
+        width
+    )
 
 
 # ============================================================
@@ -316,34 +416,49 @@ def wait_for_minigame():
     print("Waiting for minigame...")
 
     start_time = time.time()
+
     last_status = 0
 
-    while running and not emergency_stop:
+    while (
+        running
+        and
+        not emergency_stop
+    ):
 
-        elapsed = time.time() - start_time
+        elapsed = (
+            time.time()
+            - start_time
+        )
 
         if elapsed - last_status >= 5:
 
-            print(f"Still waiting... {elapsed:.1f}s")
+            print(
+                f"Still waiting... "
+                f"{elapsed:.1f}s"
+            )
 
             last_status = elapsed
 
         screenshot = pyautogui.screenshot()
 
-        pixel = screenshot.getpixel(MINIGAME_START_PIXEL)
+        pixel = screenshot.getpixel(
+            MINIGAME_START_PIXEL
+        )
 
         if is_white(pixel):
 
             print(
-                f"Minigame detected after "
-                f"{elapsed:.1f} seconds!"
+                f"Minigame detected "
+                f"after {elapsed:.1f} seconds!"
             )
 
             return True
 
         if elapsed >= MINIGAME_TIMEOUT:
 
-            print("Minigame detection timed out.")
+            print(
+                "Minigame detection timed out."
+            )
 
             return False
 
@@ -367,13 +482,20 @@ def play_fishing_minigame():
     print("CLICKS ENABLED")
     print("======================================")
 
-    time.sleep(COLOR_SAMPLE_DELAY)
+    time.sleep(
+        COLOR_SAMPLE_DELAY
+    )
 
-    current_bar_color = get_bar_color()
+    current_bar_color = (
+        get_bar_color()
+    )
 
     if current_bar_color is None:
 
-        print("Could not learn fishing bar color.")
+        print(
+            "Could not learn fishing "
+            "bar color."
+        )
 
         return
 
@@ -398,61 +520,118 @@ def play_fishing_minigame():
 
     bar_was_visible = False
 
+    # Has the rectangle actually moved from
+    # its starting position?
+    rectangle_moved = False
+
+    starting_bar_center = None
+
     panic_mode = False
 
     panic_start_time = 0
 
     last_panic_click = 0
 
-    while running and not emergency_stop:
+    while (
+        running
+        and
+        not emergency_stop
+    ):
 
-        elapsed = time.time() - start_time
+        elapsed = (
+            time.time()
+            - start_time
+        )
 
         if elapsed >= 9:
             break
 
-        # ----------------------------------------------------
+        # ====================================================
         # NORMAL DETECTION
-        # ----------------------------------------------------
+        # ====================================================
 
         result = find_bar()
 
-        # ----------------------------------------------------
-        # IF NORMAL LINE CAN'T SEE IT
-        # ----------------------------------------------------
-
         if result is None:
 
-            # If we've already seen the rectangle, try the
-            # wider 2D detector before entering panic mode.
+            # ------------------------------------------------
+            # DO NOT PANIC DURING THE INITIAL START
+            # ------------------------------------------------
+
+            if (
+                elapsed < INITIAL_GRACE_PERIOD
+            ):
+
+                time.sleep(
+                    SCAN_DELAY
+                )
+
+                continue
+
+            # ------------------------------------------------
+            # TRY 2D DETECTION FIRST
+            # ------------------------------------------------
+
             if bar_was_visible:
 
-                wider_result = find_bar_2d()
+                wider_result = (
+                    find_bar_2d()
+                )
 
                 if wider_result is not None:
 
-                    start_x, end_x, width = wider_result
+                    (
+                        start_x,
+                        end_x,
+                        width
+                    ) = wider_result
+
+                    center = (
+                        start_x
+                        + end_x
+                    ) // 2
+
+                    # Check whether rectangle
+                    # has actually moved.
+                    if (
+                        starting_bar_center
+                        is not None
+                        and
+                        abs(
+                            center
+                            - starting_bar_center
+                        )
+                        >= MOVEMENT_REQUIRED
+                    ):
+
+                        rectangle_moved = True
 
                     if panic_mode:
 
                         print(
-                            "Rectangle found in scan area - "
+                            "Rectangle found again - "
                             "panic mode OFF."
                         )
 
                     panic_mode = False
+
                     panic_start_time = 0
+
                     last_panic_click = 0
 
                     bar_was_visible = True
 
                     print(
-                        f"2D Bar X={start_x}-{end_x} "
+                        f"2D Bar "
+                        f"X={start_x}-{end_x} "
                         f"Width={width}"
                     )
 
-                    # Treat this as a normal detection.
-                    if width < ADVANCED_FISHING_THRESHOLD:
+                    if (
+                        width
+                        <
+                        ADVANCED_FISHING_THRESHOLD
+                    ):
 
                         if not danger_locked:
 
@@ -462,47 +641,69 @@ def play_fishing_minigame():
 
                             print(
                                 f"CLICK #{click_count} | "
-                                f"2D X={start_x}-{end_x} | "
+                                f"2D X={start_x}-"
+                                f"{end_x} | "
                                 f"Width={width}"
                             )
 
                             danger_locked = True
 
-                            time.sleep(REARM_DELAY)
+                            time.sleep(
+                                REARM_DELAY
+                            )
 
                     else:
 
                         danger_locked = False
 
-                    time.sleep(SCAN_DELAY)
+                    time.sleep(
+                        SCAN_DELAY
+                    )
 
                     continue
 
-                # ------------------------------------------------
-                # NOTHING FOUND EVEN WITH 2D SCAN
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # PANIC IS ONLY ALLOWED AFTER:
+            #
+            # 1. We saw the rectangle
+            # 2. It moved away from starting position
+            # ------------------------------------------------
+
+            if (
+                bar_was_visible
+                and
+                rectangle_moved
+            ):
 
                 if not panic_mode:
 
                     panic_mode = True
-                    panic_start_time = time.time()
+
+                    panic_start_time = (
+                        time.time()
+                    )
 
                     print(
-                        "Rectangle hidden - "
+                        "Rectangle hidden after "
+                        "movement - "
                         "PANIC MODE ON."
                     )
 
                 panic_elapsed = (
-                    time.time() - panic_start_time
+                    time.time()
+                    - panic_start_time
                 )
 
-                # Don't panic-click forever.
-                if panic_elapsed <= PANIC_MAX_TIME:
+                if (
+                    panic_elapsed
+                    <= PANIC_MAX_TIME
+                ):
 
                     now = time.time()
 
                     if (
-                        now - last_panic_click
+                        now
+                        - last_panic_click
                         >= MISSING_COLOR_COOLDOWN
                     ):
 
@@ -513,32 +714,70 @@ def play_fishing_minigame():
                         last_panic_click = now
 
                         print(
-                            f"PANIC CLICK #{click_count} | "
-                            f"Cooldown: 0.50s"
+                            f"PANIC CLICK "
+                            f"#{click_count} | "
+                            f"Cooldown: 0.40s"
                         )
 
                 else:
 
-                    # Stop blindly clicking.
                     if panic_mode:
 
                         print(
                             "Panic timeout - "
-                            "stopping panic clicks."
+                            "stopping panic clicks "
+                            "until rectangle "
+                            "is detected again."
                         )
 
                     panic_mode = False
-                    danger_locked = False
 
-            time.sleep(SCAN_DELAY)
+            time.sleep(
+                SCAN_DELAY
+            )
 
             continue
 
         # ====================================================
-        # NORMAL BAR DETECTED
+        # BAR DETECTED
         # ====================================================
 
-        start_x, end_x, width = result
+        (
+            start_x,
+            end_x,
+            width
+        ) = result
+
+        center = (
+            start_x
+            + end_x
+        ) // 2
+
+        # Remember starting position.
+        if (
+            starting_bar_center
+            is None
+        ):
+
+            starting_bar_center = center
+
+        # Check whether it moved.
+        if (
+            abs(
+                center
+                - starting_bar_center
+            )
+            >= MOVEMENT_REQUIRED
+        ):
+
+            if not rectangle_moved:
+
+                print(
+                    "Rectangle moved - "
+                    "panic detection enabled."
+                )
+
+            rectangle_moved = True
 
         if panic_mode:
 
@@ -548,13 +787,16 @@ def play_fishing_minigame():
             )
 
         panic_mode = False
+
         panic_start_time = 0
+
         last_panic_click = 0
 
         bar_was_visible = True
 
         print(
-            f"Bar X={start_x}-{end_x} "
+            f"Bar X={start_x}-"
+            f"{end_x} "
             f"Width={width}"
         )
 
@@ -562,7 +804,11 @@ def play_fishing_minigame():
         # DANGER ZONE
         # ====================================================
 
-        if width < ADVANCED_FISHING_THRESHOLD:
+        if (
+            width
+            <
+            ADVANCED_FISHING_THRESHOLD
+        ):
 
             if not danger_locked:
 
@@ -578,16 +824,20 @@ def play_fishing_minigame():
 
                 danger_locked = True
 
-                time.sleep(REARM_DELAY)
+                time.sleep(
+                    REARM_DELAY
+                )
 
         else:
 
-            # Re-arm once the rectangle leaves the danger zone.
             danger_locked = False
 
-        time.sleep(SCAN_DELAY)
+        time.sleep(
+            SCAN_DELAY
+        )
 
     print()
+
     print(
         f"Fishing detection finished. "
         f"Clicks: {click_count}"
@@ -595,7 +845,9 @@ def play_fishing_minigame():
 
     current_bar_color = None
 
-    print("Bar color erased.")
+    print(
+        "Bar color erased."
+    )
 
 
 # ============================================================
@@ -604,19 +856,38 @@ def play_fishing_minigame():
 
 def close_fish_result():
 
-    if not running or emergency_stop:
+    if (
+        not running
+        or
+        emergency_stop
+    ):
         return
 
     print()
-    print("Waiting 0.5 seconds before closing result...")
+    print(
+        "Waiting 0.4 seconds "
+        "before closing result..."
+    )
 
-    time.sleep(RESULT_CLOSE_DELAY)
+    time.sleep(
+        RESULT_CLOSE_DELAY
+    )
 
-    if not running or emergency_stop:
+    if (
+        not running
+        or
+        emergency_stop
+    ):
         return
 
-    print("Closing fish result...")
-    print(f"Moving to result X: {FISH_RESULT_CLOSE}")
+    print(
+        "Closing fish result..."
+    )
+
+    print(
+        f"Moving to result X: "
+        f"{FISH_RESULT_CLOSE}"
+    )
 
     move_mouse_native(
         FISH_RESULT_CLOSE[0],
@@ -629,7 +900,9 @@ def close_fish_result():
 
     time.sleep(0.4)
 
-    print("Fish result closed.")
+    print(
+        "Fish result closed."
+    )
 
 
 # ============================================================
@@ -638,15 +911,23 @@ def close_fish_result():
 
 def fishing_cycle(cycle_number):
 
-    if not running or emergency_stop:
+    if (
+        not running
+        or
+        emergency_stop
+    ):
         return False
 
     print()
     print("======================================")
-    print(f"FISHING CYCLE #{cycle_number}")
+    print(
+        f"FISHING CYCLE #{cycle_number}"
+    )
     print("======================================")
 
-    print("Moving to Fish button...")
+    print(
+        "Moving to Fish button..."
+    )
 
     move_mouse_native(
         FISH_BUTTON[0],
@@ -658,11 +939,16 @@ def fishing_cycle(cycle_number):
     native_click()
 
     if not wait_for_minigame():
+
         return False
 
     play_fishing_minigame()
 
-    if not running or emergency_stop:
+    if (
+        not running
+        or
+        emergency_stop
+    ):
         return False
 
     close_fish_result()
@@ -686,9 +972,15 @@ def macro_loop():
 
     cycle_number = 1
 
-    while running and not emergency_stop:
+    while (
+        running
+        and
+        not emergency_stop
+    ):
 
-        success = fishing_cycle(cycle_number)
+        success = fishing_cycle(
+            cycle_number
+        )
 
         if not success:
             break
@@ -698,7 +990,9 @@ def macro_loop():
         time.sleep(0.5)
 
     print()
-    print("Macro loop stopped.")
+    print(
+        "Macro loop stopped."
+    )
 
 
 # ============================================================
@@ -713,17 +1007,22 @@ def toggle_macro():
     if running:
 
         print()
-        print("Macro PAUSED.")
+        print(
+            "Macro PAUSED."
+        )
 
         running = False
 
     else:
 
         emergency_stop = False
+
         running = True
 
         print()
-        print("Macro STARTED.")
+        print(
+            "Macro STARTED."
+        )
 
         macro_loop()
 
@@ -738,11 +1037,14 @@ def emergency():
     global emergency_stop
 
     emergency_stop = True
+
     running = False
 
     print()
     print("======================================")
-    print("EMERGENCY STOP")
+    print(
+        "EMERGENCY STOP"
+    )
     print("======================================")
 
 
@@ -751,28 +1053,48 @@ def emergency():
 # ============================================================
 
 print("======================================")
-print("SOLS RNG FISHING MACRO")
+print(
+    "SOLS RNG FISHING MACRO"
+)
 print("======================================")
 print("F8 = Start")
 print("F3 = Emergency Stop")
 print()
-print("Fishing + fish-result loop enabled.")
+print(
+    "Fishing + fish-result loop enabled."
+)
 print(
     f"Advanced threshold: "
     f"{ADVANCED_FISHING_THRESHOLD} pixels"
 )
-print("State-based clicking enabled.")
-print("Panic cooldown: 0.50 seconds")
-print("2D rectangle recovery detection enabled.")
-print("Result close delay: 0.50 seconds")
+print(
+    "State-based clicking enabled."
+)
+print(
+    "Panic cooldown: 0.40 seconds"
+)
+print(
+    "Initial panic protection enabled."
+)
+print(
+    "Result close delay: 0.40 seconds"
+)
 print("======================================")
 
-keyboard.add_hotkey("f8", toggle_macro)
-keyboard.add_hotkey("f3", emergency)
+keyboard.add_hotkey(
+    "f8",
+    toggle_macro
+)
+
+keyboard.add_hotkey(
+    "f3",
+    emergency
+)
 
 try:
 
     while True:
+
         time.sleep(0.1)
 
 except KeyboardInterrupt:
