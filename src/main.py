@@ -35,11 +35,17 @@ CENTER_X = 959
 CENTER_CLICK_INTERVAL = 0.20
 CENTER_TOLERANCE = 8
 
+# Fallback line detection
 LINE_BRIGHTNESS = 215
 LINE_MIN_HEIGHT = 5
 
-# Ignore suspicious fallback detections
-MAX_LINE_JUMP = 35
+# The repeated ~779 detection is a static UI element,
+# not the moving player line.
+IGNORE_LINE_LEFT = 765
+IGNORE_LINE_RIGHT = 800
+
+# Prevent fallback from clicking faster than this.
+FALLBACK_CLICK_INTERVAL = 0.20
 
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
@@ -298,6 +304,10 @@ def find_player_line():
         BAR_RIGHT + 1
     ):
 
+        # Ignore the static UI element around X=779.
+        if IGNORE_LINE_LEFT <= x <= IGNORE_LINE_RIGHT:
+            continue
+
         bright_pixels = 0
 
         for y in range(2, 23):
@@ -352,17 +362,20 @@ def find_player_line():
 
 
 # =========================
-# CENTER FALLBACK
+# CENTER / LINE FALLBACK
 # =========================
 
 def center_fallback(
     last_line_position,
-    last_center_click
+    last_fallback_click
 ):
 
     line_position = find_player_line()
 
-    # Nothing visible
+    # ---------------------------------
+    # LINE HIDDEN
+    # ---------------------------------
+
     if line_position is None:
 
         print(
@@ -371,32 +384,8 @@ def center_fallback(
 
         return (
             last_line_position,
-            last_center_click
+            last_fallback_click
         )
-
-    # ---------------------------------
-    # REJECT SUSPICIOUS JUMPS
-    # ---------------------------------
-
-    if last_line_position is not None:
-
-        jump = abs(
-            line_position
-            - last_line_position
-        )
-
-        if jump > MAX_LINE_JUMP:
-
-            print(
-                f"LINE REJECTED: "
-                f"{line_position} "
-                f"(jump={jump})"
-            )
-
-            return (
-                last_line_position,
-                last_center_click
-            )
 
     last_line_position = line_position
 
@@ -411,21 +400,33 @@ def center_fallback(
         f"| Distance={distance}"
     )
 
+    now = time.time()
+
     # ---------------------------------
     # LEFT OF CENTER
     # ---------------------------------
 
     if distance < -CENTER_TOLERANCE:
 
-        print(
-            "Line LEFT of center - CLICKING"
-        )
+        if (
+            now - last_fallback_click
+            >= FALLBACK_CLICK_INTERVAL
+        ):
 
-        native_click()
+            print(
+                "Line LEFT of center - CLICKING"
+            )
+
+            native_click()
+
+            return (
+                last_line_position,
+                now
+            )
 
         return (
             last_line_position,
-            time.time()
+            last_fallback_click
         )
 
     # ---------------------------------
@@ -440,17 +441,15 @@ def center_fallback(
 
         return (
             last_line_position,
-            last_center_click
+            last_fallback_click
         )
 
     # ---------------------------------
     # CENTER
     # ---------------------------------
 
-    now = time.time()
-
     if (
-        now - last_center_click
+        now - last_fallback_click
         >= CENTER_CLICK_INTERVAL
     ):
 
@@ -467,7 +466,7 @@ def center_fallback(
 
     return (
         last_line_position,
-        last_center_click
+        last_fallback_click
     )
 
 
@@ -507,7 +506,7 @@ def fishing_minigame():
     missed_scans = 0
 
     last_line_position = None
-    last_center_click = 0
+    last_fallback_click = 0
 
     while (
         running
@@ -571,10 +570,10 @@ def fishing_minigame():
 
             (
                 last_line_position,
-                last_center_click
+                last_fallback_click
             ) = center_fallback(
                 last_line_position,
-                last_center_click
+                last_fallback_click
             )
 
         time.sleep(0.01)
@@ -784,11 +783,11 @@ print(
 )
 
 print(
-    "Hidden line will NOT use stale position."
+    "Static false line area is ignored."
 )
 
 print(
-    "Suspicious line jumps are ignored."
+    "Fallback clicks are limited to 0.20s."
 )
 
 print(
