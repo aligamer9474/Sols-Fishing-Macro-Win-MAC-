@@ -7,15 +7,14 @@ import keyboard
 from PIL import ImageGrab
 
 
-# ============================================================
+# =========================
 # SETTINGS
-# ============================================================
+# =========================
 
 FISH_BUTTON = (853, 832)
 FISH_RESULT_CLOSE = (1113, 342)
 
 MINIGAME_START_PIXEL = (1176, 836)
-
 MINIGAME_MOUSE_POSITION = (950, 880)
 
 BAR_LEFT = 757
@@ -27,40 +26,25 @@ BAR_SAMPLE_Y = 767
 
 BAR_COLOR_TOLERANCE = 5
 BAR_EXPAND_TOLERANCE = 10
-
 ADVANCED_THRESHOLD = 25
 
 MINIGAME_TIME = 9.0
-
 SUCCESS_CLICK_DELAY = 0.025
 
-# ============================================================
-# CENTER FALLBACK
-# ============================================================
-
 CENTER_X = 959
-
-# How often to click when the line is sitting around center.
 CENTER_CLICK_INTERVAL = 0.20
-
-# How close to center counts as centered.
 CENTER_TOLERANCE = 8
 
-# Brightness/color settings used to find the player's line.
 LINE_BRIGHTNESS = 215
 LINE_MIN_HEIGHT = 5
-
-# ============================================================
-# OLD RESULT TIMING
-# ============================================================
 
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
 
 
-# ============================================================
-# WINDOWS MOUSE
-# ============================================================
+# =========================
+# WINDOWS MOUSE INPUT
+# =========================
 
 user32 = ctypes.windll.user32
 
@@ -72,7 +56,7 @@ MOUSEEVENTF_LEFTUP = 0x0004
 class POINT(ctypes.Structure):
     _fields_ = [
         ("x", wintypes.LONG),
-        ("y", wintypes.LONG),
+        ("y", wintypes.LONG)
     ]
 
 
@@ -83,9 +67,7 @@ def get_mouse_position():
 
 
 def move_mouse_native(target_x, target_y):
-
     while True:
-
         current_x, current_y = get_mouse_position()
 
         dx = target_x - current_x
@@ -109,7 +91,6 @@ def move_mouse_native(target_x, target_y):
 
 
 def native_click():
-
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -129,21 +110,20 @@ def native_click():
     )
 
 
-# ============================================================
-# STATE
-# ============================================================
+# =========================
+# MACRO STATE
+# =========================
 
 running = False
 emergency_stop = False
 cycle_count = 0
 
 
-# ============================================================
-# COLOR
-# ============================================================
+# =========================
+# COLOR DETECTION
+# =========================
 
 def color_matches(pixel, target, tolerance):
-
     if pixel is None or target is None:
         return False
 
@@ -154,12 +134,11 @@ def color_matches(pixel, target, tolerance):
     )
 
 
-# ============================================================
-# MINIGAME START
-# ============================================================
+# =========================
+# MINIGAME DETECTION
+# =========================
 
 def minigame_started():
-
     screenshot = ImageGrab.grab(
         bbox=(
             MINIGAME_START_PIXEL[0],
@@ -179,7 +158,6 @@ def minigame_started():
 
 
 def wait_for_minigame():
-
     print()
     print("Waiting for minigame...")
 
@@ -189,12 +167,10 @@ def wait_for_minigame():
     while running and not emergency_stop:
 
         if minigame_started():
-
             elapsed = time.time() - start
 
             print(
-                f"Minigame detected after "
-                f"{elapsed:.1f} seconds!"
+                f"Minigame detected after {elapsed:.1f} seconds!"
             )
 
             return True
@@ -202,10 +178,8 @@ def wait_for_minigame():
         elapsed = time.time() - start
 
         if elapsed - last_status >= 5:
-
             print(
-                f"Still waiting... "
-                f"{elapsed:.1f}s"
+                f"Still waiting... {elapsed:.1f}s"
             )
 
             last_status = elapsed
@@ -215,9 +189,9 @@ def wait_for_minigame():
     return False
 
 
-# ============================================================
+# =========================
 # BAR COLOR
-# ============================================================
+# =========================
 
 def get_bar_color():
 
@@ -240,9 +214,9 @@ def get_bar_color():
     return screenshot.getpixel((0, 0))
 
 
-# ============================================================
-# FIND RECTANGLE
-# ============================================================
+# =========================
+# FIND FISHING BAR
+# =========================
 
 def find_bar(screenshot, bar_color):
 
@@ -252,14 +226,16 @@ def find_bar(screenshot, bar_color):
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
-        pixel = pixels[x - BAR_LEFT, 0]
+        pixel = pixels[
+            x - BAR_LEFT,
+            0
+        ]
 
         if color_matches(
             pixel,
             bar_color,
             BAR_COLOR_TOLERANCE
         ):
-
             left_x = x
             break
 
@@ -268,37 +244,39 @@ def find_bar(screenshot, bar_color):
 
     right_x = left_x
 
-    for x in range(left_x + 1, BAR_RIGHT + 1):
+    for x in range(
+        left_x + 1,
+        BAR_RIGHT + 1
+    ):
 
-        pixel = pixels[x - BAR_LEFT, 0]
+        pixel = pixels[
+            x - BAR_LEFT,
+            0
+        ]
 
         if color_matches(
             pixel,
             bar_color,
             BAR_EXPAND_TOLERANCE
         ):
-
             right_x = x
-
         else:
             break
 
     bar_width = right_x - left_x
 
-    return left_x, right_x, bar_width
+    return (
+        left_x,
+        right_x,
+        bar_width
+    )
 
 
-# ============================================================
+# =========================
 # FIND PLAYER LINE
-# ============================================================
+# =========================
 
 def find_player_line():
-
-    # Look at a vertical strip around the fishing line.
-    #
-    # We intentionally look slightly above and below the
-    # normal bar row so the rectangle itself is less likely
-    # to be mistaken for the player's line.
 
     screenshot = ImageGrab.grab(
         bbox=(
@@ -313,48 +291,51 @@ def find_player_line():
 
     candidates = []
 
-    for x in range(BAR_LEFT, BAR_RIGHT + 1):
+    for x in range(
+        BAR_LEFT,
+        BAR_RIGHT + 1
+    ):
 
         bright_pixels = 0
 
         for y in range(2, 23):
 
-            pixel = pixels[x - BAR_LEFT, y]
+            pixel = pixels[
+                x - BAR_LEFT,
+                y
+            ]
 
             if (
                 pixel[0] >= LINE_BRIGHTNESS
                 and pixel[1] >= LINE_BRIGHTNESS
                 and pixel[2] >= LINE_BRIGHTNESS
             ):
-
                 bright_pixels += 1
 
         if bright_pixels >= LINE_MIN_HEIGHT:
-
             candidates.append(x)
 
     if not candidates:
         return None
 
-    # Group nearby pixels into one line.
     groups = []
 
-    current_group = [candidates[0]]
+    current_group = [
+        candidates[0]
+    ]
 
     for x in candidates[1:]:
 
         if x <= current_group[-1] + 2:
-
             current_group.append(x)
 
         else:
-
             groups.append(current_group)
+
             current_group = [x]
 
     groups.append(current_group)
 
-    # Pick the strongest vertical line.
     best_group = max(
         groups,
         key=len
@@ -364,38 +345,34 @@ def find_player_line():
         return None
 
     return (
-        best_group[0] + best_group[-1]
+        best_group[0]
+        + best_group[-1]
     ) // 2
 
 
-# ============================================================
+# =========================
 # CENTER FALLBACK
-# ============================================================
+# =========================
 
-def center_fallback(last_line_position, last_center_click):
+def center_fallback(last_center_click):
 
     line_position = find_player_line()
 
-    # --------------------------------------------------------
-    # If we can see the line, use its actual position.
-    # --------------------------------------------------------
+    # ---------------------------------
+    # LINE IS VISIBLE
+    # ---------------------------------
 
     if line_position is not None:
 
-        last_line_position = line_position
-
-        distance = (
-            line_position - CENTER_X
-        )
+        distance = line_position - CENTER_X
 
         print(
-            f"LINE FOUND: "
-            f"{line_position} | "
-            f"Center={CENTER_X} | "
-            f"Distance={distance}"
+            f"LINE FOUND: {line_position} "
+            f"| Center={CENTER_X} "
+            f"| Distance={distance}"
         )
 
-        # Line is clearly LEFT of center.
+        # Line is LEFT of center
         if distance < -CENTER_TOLERANCE:
 
             print(
@@ -404,25 +381,18 @@ def center_fallback(last_line_position, last_center_click):
 
             native_click()
 
-            return (
-                last_line_position,
-                time.time()
-            )
+            return time.time()
 
-        # Line is clearly RIGHT of center.
+        # Line is RIGHT of center
         elif distance > CENTER_TOLERANCE:
 
             print(
-                "Line RIGHT of center - "
-                "NOT CLICKING"
+                "Line RIGHT of center - NOT CLICKING"
             )
 
-            return (
-                last_line_position,
-                last_center_click
-            )
+            return last_center_click
 
-        # Line is around center.
+        # Line is at center
         else:
 
             now = time.time()
@@ -433,90 +403,34 @@ def center_fallback(last_line_position, last_center_click):
             ):
 
                 print(
-                    "Line at CENTER - "
-                    "CENTER CLICK"
+                    "Line at CENTER - CENTER CLICK"
                 )
 
                 native_click()
 
-                return (
-                    last_line_position,
-                    now
-                )
+                return now
 
-            return (
-                last_line_position,
-                last_center_click
-            )
+            return last_center_click
 
-    # --------------------------------------------------------
-    # If the line itself is hidden by the timer too,
-    # use the last known position.
-    # --------------------------------------------------------
+    # ---------------------------------
+    # LINE IS HIDDEN
+    # ---------------------------------
 
-    if last_line_position is not None:
+    # IMPORTANT:
+    # Do NOT use the last known position.
+    # Do NOT click while the line is hidden.
+    # Simply wait for it to become visible again.
 
-        distance = (
-            last_line_position - CENTER_X
-        )
-
-        if distance < -CENTER_TOLERANCE:
-
-            print(
-                "LINE HIDDEN - "
-                "LAST POSITION LEFT - CLICKING"
-            )
-
-            native_click()
-
-            return (
-                last_line_position,
-                time.time()
-            )
-
-        elif distance > CENTER_TOLERANCE:
-
-            print(
-                "LINE HIDDEN - "
-                "LAST POSITION RIGHT - "
-                "NOT CLICKING"
-            )
-
-            return (
-                last_line_position,
-                last_center_click
-            )
-
-        else:
-
-            now = time.time()
-
-            if (
-                now - last_center_click
-                >= CENTER_CLICK_INTERVAL
-            ):
-
-                print(
-                    "LINE HIDDEN - "
-                    "CENTER HOLD CLICK"
-                )
-
-                native_click()
-
-                return (
-                    last_line_position,
-                    now
-                )
-
-    return (
-        last_line_position,
-        last_center_click
+    print(
+        "LINE HIDDEN - WAITING FOR LINE"
     )
 
+    return last_center_click
 
-# ============================================================
+
+# =========================
 # FISHING MINIGAME
-# ============================================================
+# =========================
 
 def fishing_minigame():
 
@@ -535,8 +449,7 @@ def fishing_minigame():
     bar_color = get_bar_color()
 
     print(
-        f"Bar color learned: RGB"
-        f"{bar_color}"
+        f"Bar color learned: RGB{bar_color}"
     )
 
     print(
@@ -550,7 +463,6 @@ def fishing_minigame():
     detections = 0
     missed_scans = 0
 
-    last_line_position = None
     last_center_click = 0
 
     while (
@@ -573,9 +485,9 @@ def fishing_minigame():
             bar_color
         )
 
-        # ====================================================
-        # RECTANGLE DETECTED
-        # ====================================================
+        # ---------------------------------
+        # BAR FOUND
+        # ---------------------------------
 
         if result is not None:
 
@@ -605,24 +517,17 @@ def fishing_minigame():
                     SUCCESS_CLICK_DELAY
                 )
 
-        # ====================================================
-        # RECTANGLE NOT DETECTED
-        # ====================================================
+        # ---------------------------------
+        # BAR NOT FOUND
+        # ---------------------------------
 
         else:
 
             missed_scans += 1
 
-            (
-                previous_line,
-                previous_center_click
-            ) = center_fallback(
-                last_line_position,
+            last_center_click = center_fallback(
                 last_center_click
             )
-
-            last_line_position = previous_line
-            last_center_click = previous_center_click
 
         time.sleep(0.01)
 
@@ -630,24 +535,21 @@ def fishing_minigame():
     print("Fishing detection finished.")
 
     print(
-        f"Bar detections: "
-        f"{detections}"
+        f"Bar detections: {detections}"
     )
 
     print(
-        f"Missed scans: "
-        f"{missed_scans}"
+        f"Missed scans: {missed_scans}"
     )
 
     print(
-        f"Total clicks: "
-        f"{total_clicks}"
+        f"Total clicks: {total_clicks}"
     )
 
 
-# ============================================================
-# FISH RESULT
-# ============================================================
+# =========================
+# CLOSE FISH RESULT
+# =========================
 
 def close_fish_result():
 
@@ -680,9 +582,9 @@ def close_fish_result():
     )
 
 
-# ============================================================
+# =========================
 # FISHING CYCLE
-# ============================================================
+# =========================
 
 def fishing_cycle():
 
@@ -692,11 +594,9 @@ def fishing_cycle():
 
     print()
     print("======================================")
-
     print(
         f"FISHING CYCLE #{cycle_count}"
     )
-
     print("======================================")
 
     print(
@@ -725,7 +625,10 @@ def fishing_cycle():
 
     fishing_minigame()
 
-    if not running or emergency_stop:
+    if (
+        not running
+        or emergency_stop
+    ):
         return
 
     close_fish_result()
@@ -736,23 +639,30 @@ def fishing_cycle():
     )
 
 
-# ============================================================
-# MACRO LOOP
-# ============================================================
+# =========================
+# MAIN MACRO LOOP
+# =========================
 
 def macro_loop():
 
-    while running and not emergency_stop:
+    while (
+        running
+        and not emergency_stop
+    ):
 
         fishing_cycle()
 
-        if running and not emergency_stop:
+        if (
+            running
+            and not emergency_stop
+        ):
+
             time.sleep(0.3)
 
 
-# ============================================================
-# F8
-# ============================================================
+# =========================
+# HOTKEYS
+# =========================
 
 def toggle_macro():
 
@@ -763,14 +673,18 @@ def toggle_macro():
         running = False
 
         print()
-        print("Macro PAUSED.")
+        print(
+            "Macro PAUSED."
+        )
 
     else:
 
         running = True
 
         print()
-        print("Macro STARTED.")
+        print(
+            "Macro STARTED."
+        )
 
         thread = threading.Thread(
             target=macro_loop,
@@ -779,10 +693,6 @@ def toggle_macro():
 
         thread.start()
 
-
-# ============================================================
-# F3
-# ============================================================
 
 def emergency():
 
@@ -798,9 +708,9 @@ def emergency():
     )
 
 
-# ============================================================
-# MAIN
-# ============================================================
+# =========================
+# START PROGRAM
+# =========================
 
 print("======================================")
 print("SOLS RNG FISHING MACRO")
@@ -808,29 +718,48 @@ print("======================================")
 print("F8 = Start / Pause")
 print("F3 = Emergency Stop")
 print()
-print("Old AHK fishing detection restored.")
-print("Mouse does NOT move during the minigame.")
-print("No rapid clicking.")
-print("No dynamic color re-learning.")
+
+print(
+    "Old AHK fishing detection restored."
+)
+
+print(
+    "Mouse does NOT move during the minigame."
+)
+
+print(
+    "Hidden line will NOT use stale position."
+)
+
+print(
+    "No rapid clicking when line disappears."
+)
+
 print(
     f"Fishing line: "
     f"{BAR_LEFT}-{BAR_RIGHT} "
     f"at Y={BAR_Y}"
 )
+
 print(
     f"Threshold: "
     f"{ADVANCED_THRESHOLD}"
 )
+
 print(
     f"Detection time: "
     f"{MINIGAME_TIME}s"
 )
+
 print(
-    "Hidden-bar fallback uses center tracking."
+    "Hidden-bar fallback waits for "
+    "the line to return."
 )
+
 print(
     "Result X has old 300ms/700ms timing."
 )
+
 print("======================================")
 print()
 
@@ -847,7 +776,6 @@ keyboard.add_hotkey(
 try:
 
     while not emergency_stop:
-
         time.sleep(0.1)
 
 except KeyboardInterrupt:
