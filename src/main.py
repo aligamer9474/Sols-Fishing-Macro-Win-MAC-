@@ -16,7 +16,6 @@ FISH_RESULT_CLOSE = (1113, 342)
 
 MINIGAME_START_PIXEL = (1176, 836)
 
-# Old macro's mouse position before sampling the bar.
 MINIGAME_MOUSE_POSITION = (950, 880)
 
 BAR_LEFT = 757
@@ -26,6 +25,10 @@ BAR_Y = 767
 BAR_SAMPLE_X = 955
 BAR_SAMPLE_Y = 767
 
+# EXACT CENTER OF THE FISHING BAR
+BAR_CENTER_X = (BAR_LEFT + BAR_RIGHT) // 2
+BAR_CENTER_Y = BAR_Y
+
 BAR_COLOR_TOLERANCE = 5
 BAR_EXPAND_TOLERANCE = 10
 
@@ -33,13 +36,11 @@ ADVANCED_THRESHOLD = 25
 
 MINIGAME_TIME = 9.0
 
-# Old macro uses sleep 25 after a successful click.
 SUCCESS_CLICK_DELAY = 0.025
 
-# Slower panic clicking.
+# Panic clicks are slower.
 PANIC_CLICK_DELAY = 0.35
 
-# Old result timing.
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
 
@@ -194,8 +195,6 @@ def wait_for_minigame():
 # ============================================================
 
 def get_bar_color():
-    # This is the old macro behavior:
-    # move to 950,880, wait 50ms, sample 955,767.
 
     move_mouse_native(
         MINIGAME_MOUSE_POSITION[0],
@@ -221,12 +220,11 @@ def get_bar_color():
 # ============================================================
 
 def find_bar(screenshot, bar_color):
+
     pixels = screenshot.load()
 
     left_x = None
 
-    # Equivalent to AHK PixelSearch across:
-    # 757,767 -> 1161,767
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
         pixel = pixels[x - BAR_LEFT, 0]
@@ -244,7 +242,6 @@ def find_bar(screenshot, bar_color):
 
     right_x = left_x
 
-    # Expand exactly like the old macro.
     for x in range(left_x + 1, BAR_RIGHT + 1):
 
         pixel = pixels[x - BAR_LEFT, 0]
@@ -305,7 +302,6 @@ def fishing_minigame():
         and time.time() - start_time < MINIGAME_TIME
     ):
 
-        # Screenshot ONLY the single fishing-bar row.
         screenshot = ImageGrab.grab(
             bbox=(
                 BAR_LEFT,
@@ -345,7 +341,6 @@ def fishing_minigame():
                     f"CLICK #{total_clicks}"
                 )
 
-                # EXACT old macro timing.
                 time.sleep(
                     SUCCESS_CLICK_DELAY
                 )
@@ -354,11 +349,22 @@ def fishing_minigame():
 
             missed_scans += 1
 
-            # Slower panic clicks.
+            # =================================================
+            # ONLY CHANGE:
+            # When the rectangle is hidden by the timer,
+            # move to the exact center of the fishing bar
+            # and use slow panic clicks there.
+            # =================================================
+
             if (
                 now - last_panic_click
                 >= PANIC_CLICK_DELAY
             ):
+
+                move_mouse_native(
+                    BAR_CENTER_X,
+                    BAR_CENTER_Y
+                )
 
                 native_click()
 
@@ -368,10 +374,9 @@ def fishing_minigame():
 
                 print(
                     f"PANIC CLICK #{total_clicks} "
-                    f"(bar not detected)"
+                    f"(center)"
                 )
 
-        # Old macro's scan loop had a 10ms sleep.
         time.sleep(0.01)
 
     print()
@@ -549,9 +554,11 @@ print("F8 = Start / Pause")
 print("F3 = Emergency Stop")
 print()
 print("Old AHK fishing detection restored.")
+print("Rectangle detection unchanged.")
 print("Mouse does NOT follow the rectangle.")
 print("Success clicks: 25ms apart.")
 print("Panic clicks: 350ms apart.")
+print("Panic clicks target the bar center.")
 print("No dynamic color re-learning.")
 print(
     f"Fishing line: "
