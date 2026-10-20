@@ -1,5 +1,4 @@
 import time
-import threading
 import ctypes
 import ctypes.wintypes
 import pyautogui
@@ -39,8 +38,6 @@ FALLBACK_CLICK_INTERVAL = 0.20
 
 MINIGAME_WAIT_TIMEOUT = 15.0
 MINIGAME_TIMEOUT = 30.0
-
-BAR_COLOR_WAIT = 3.0
 
 FINISH_HIDDEN_TIME = 1.0
 
@@ -147,8 +144,30 @@ def emergency_stop():
 
 
 # ============================================================
-# BAR COLOR
+# PURPLE BAR COLOR
 # ============================================================
+
+def looks_like_bar_color(color):
+
+    r, g, b = color
+
+    # The actual fishing rectangle is purple.
+    #
+    # Examples:
+    # (150, 89, 185) -> valid
+    #
+    # Blue/green UI pixels such as:
+    # (43, 108, 211)
+    # (93, 208, 111)
+    # are rejected.
+
+    return (
+        r >= 100 and
+        b >= 120 and
+        r > g + 30 and
+        b > g + 30
+    )
+
 
 def get_bar_color():
 
@@ -156,34 +175,32 @@ def get_bar_color():
 
     start = time.time()
 
-    last_color = None
-
     while running and not stop_requested:
 
-        color = pyautogui.pixel(955, BAR_Y)
+        # Search the entire bar row instead of trusting
+        # one pixel at 955.
+        for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
-        last_color = color
+            color = pyautogui.pixel(x, BAR_Y)
 
-        # Accept the sampled color instead of rejecting it
-        # based on RGB assumptions.
-        #
-        # This is how the old working detector operated.
-        if color != (0, 0, 0):
+            if looks_like_bar_color(color):
 
-            print(f"BAR COLOR FOUND: {color}")
+                print(
+                    f"BAR COLOR FOUND: {color} "
+                    f"AT X={x}"
+                )
 
-            return color
+                return color
 
-        if time.time() - start >= BAR_COLOR_WAIT:
+        # Give Roblox time to actually draw the bar.
+        time.sleep(0.03)
 
-            print(
-                f"BAR COLOR STILL NOT FOUND "
-                f"(last={last_color})"
-            )
+        # Do not give up quickly.
+        if time.time() - start >= MINIGAME_TIMEOUT:
+
+            print("BAR COLOR NOT FOUND")
 
             return None
-
-        time.sleep(0.03)
 
     return None
 
@@ -330,6 +347,7 @@ def run_fishing_minigame():
     if bar_color is None:
 
         print("BAR COLOR NOT FOUND")
+
         return False
 
     rectangle_center_clicked = False
@@ -343,7 +361,7 @@ def run_fishing_minigame():
     while running and not stop_requested:
 
         # ----------------------------------------------------
-        # MINIGAME TIMEOUT
+        # TIMEOUT
         # ----------------------------------------------------
 
         if time.time() - start_time >= MINIGAME_TIMEOUT:
@@ -370,7 +388,7 @@ def run_fishing_minigame():
             )
 
             # ------------------------------------------------
-            # RECTANGLE CENTER
+            # RECTANGLE IS CENTERED
             # ------------------------------------------------
 
             if left_x <= CENTER_X <= right_x:
@@ -394,7 +412,7 @@ def run_fishing_minigame():
                     )
 
             # ------------------------------------------------
-            # RECTANGLE AWAY FROM CENTER
+            # RECTANGLE MOVED AWAY
             # ------------------------------------------------
 
             else:
@@ -446,7 +464,7 @@ def run_fishing_minigame():
                 f"(distance {distance})"
             )
 
-            # LEFT
+            # LEFT OF CENTER
             if distance < -CENTER_TOLERANCE:
 
                 if (
@@ -464,7 +482,7 @@ def run_fishing_minigame():
 
                     print("LINE LEFT -> WAIT")
 
-            # RIGHT
+            # RIGHT OF CENTER
             elif distance > CENTER_TOLERANCE:
 
                 print("LINE RIGHT -> NO CLICK")
@@ -498,8 +516,8 @@ def run_fishing_minigame():
 
             print("LINE HIDDEN -> NO CLICK")
 
-            # Only consider the minigame finished after
-            # BOTH detectors have been empty continuously.
+            # Both the rectangle and line have disappeared.
+            # Only then do we consider the minigame finished.
             if (
                 time.time() - bar_hidden_since
                 >= FINISH_HIDDEN_TIME
@@ -550,7 +568,7 @@ def fishing_loop():
         time.sleep(0.10)
 
         # ----------------------------------------------------
-        # MINIGAME
+        # WAIT FOR MINIGAME
         # ----------------------------------------------------
 
         if not wait_for_minigame():
@@ -561,6 +579,10 @@ def fishing_loop():
             running = False
 
             break
+
+        # ----------------------------------------------------
+        # MINIGAME
+        # ----------------------------------------------------
 
         finished = run_fishing_minigame()
 
