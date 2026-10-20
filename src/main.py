@@ -40,10 +40,7 @@ IGNORE_LINE_RIGHT = 800
 
 CENTER_FALLBACK_CLICK_INTERVAL = 0.20
 
-# How long to wait for the minigame
 MINIGAME_WAIT_TIMEOUT = 15.0
-
-# How long the actual minigame can run
 MINIGAME_TIMEOUT = 9.0
 
 
@@ -319,7 +316,6 @@ def center_fallback(
 
     distance = line_x - CENTER_X
 
-    # LEFT
     if distance < -CENTER_TOLERANCE:
 
         native_click()
@@ -331,7 +327,6 @@ def center_fallback(
 
         return time.monotonic()
 
-    # RIGHT
     if distance > CENTER_TOLERANCE:
 
         print(
@@ -341,7 +336,6 @@ def center_fallback(
 
         return last_fallback_click
 
-    # CENTER
     now = time.monotonic()
 
     if (
@@ -384,16 +378,12 @@ def wait_for_minigame():
 
             return True
 
-        # Patiently wait instead of
-        # starting another fishing cycle
         if (
             time.monotonic() - start_time
             > MINIGAME_WAIT_TIMEOUT
         ):
 
-            print(
-                "MINIGAME WAIT TIMEOUT"
-            )
+            print("MINIGAME WAIT TIMEOUT")
 
             return False
 
@@ -408,17 +398,9 @@ def wait_for_minigame():
 
 def run_fishing_minigame():
 
-    global running
-
-    # Wait patiently
     if not wait_for_minigame():
-
-        # IMPORTANT:
-        # Do NOT let the main loop immediately
-        # click Fish again.
         return False
 
-    # Move to the fishing bar
     move_mouse_native(
         950,
         880
@@ -448,9 +430,7 @@ def run_fishing_minigame():
             > MINIGAME_TIMEOUT
         ):
 
-            print(
-                "MINIGAME TIMEOUT"
-            )
+            print("MINIGAME TIMEOUT")
 
             break
 
@@ -523,11 +503,7 @@ def run_fishing_minigame():
                     "-> NO CLICK"
                 )
 
-            # Rectangle is visible.
-            # Fallback is not used.
-            last_fallback_click = (
-                time.monotonic()
-            )
+            last_fallback_click = time.monotonic()
 
         # =========================
         # RECTANGLE HIDDEN
@@ -591,6 +567,7 @@ def run_fishing_minigame():
 def fishing_loop():
 
     global cycle_count
+    global running
 
     while not emergency_stop:
 
@@ -607,7 +584,6 @@ def fishing_loop():
             f"{cycle_count} =========="
         )
 
-        # Move to Fish button
         move_mouse_native(
             FISH_BUTTON_X,
             FISH_BUTTON_Y
@@ -622,13 +598,10 @@ def fishing_loop():
             "FISH BUTTON CLICKED"
         )
 
-        # Give Roblox time to open
-        # the minigame
         time.sleep(0.20)
 
         # Wait for the minigame.
-        # We DO NOT click Fish again
-        # while waiting.
+        # It will NOT click Fish again.
         success = run_fishing_minigame()
 
         if not success:
@@ -638,8 +611,7 @@ def fishing_loop():
             )
 
             print(
-                "PAUSING MACRO "
-                "TO PREVENT REPEATED FISH CLICKS."
+                "MACRO PAUSED."
             )
 
             running = False
