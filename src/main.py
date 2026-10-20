@@ -2,6 +2,7 @@ import pyautogui
 import keyboard
 import time
 import ctypes
+import ctypes.wintypes
 
 # =========================
 # SETTINGS
@@ -31,8 +32,12 @@ IGNORE_LINE_RIGHT = 800
 
 CENTER_FALLBACK_CLICK_INTERVAL = 0.20
 
-MINIGAME_WAIT_TIMEOUT = 15.0
-MINIGAME_TIMEOUT = 15.0
+# More patient
+MINIGAME_WAIT_TIMEOUT = 30.0
+MINIGAME_TIMEOUT = 30.0
+
+# Time before trying the next fish
+AFTER_X_DELAY = 0.75
 
 running = False
 stop_requested = False
@@ -82,6 +87,36 @@ def move_mouse(x, y):
         time.sleep(0.004)
 
 
+def move_mouse_fast(x, y):
+    """
+    Faster movement used AFTER the minigame.
+    The fishing button movement stays slow because Roblox
+    needs to properly recognize the hover.
+    """
+
+    while running:
+        current_x, current_y = get_mouse_pos()
+
+        dx = x - current_x
+        dy = y - current_y
+
+        if abs(dx) <= 2 and abs(dy) <= 2:
+            break
+
+        dx = max(-12, min(12, dx))
+        dy = max(-12, min(12, dy))
+
+        user32.mouse_event(
+            MOUSEEVENTF_MOVE,
+            dx,
+            dy,
+            0,
+            0
+        )
+
+        time.sleep(0.002)
+
+
 def click_mouse():
     if not running:
         return
@@ -121,7 +156,12 @@ def is_white(pixel):
         return False
 
     r, g, b = pixel
-    return r >= 240 and g >= 240 and b >= 240
+
+    return (
+        r >= 240
+        and g >= 240
+        and b >= 240
+    )
 
 
 # =========================
@@ -162,7 +202,10 @@ def wait_for_minigame():
     start = time.monotonic()
 
     while running:
-        if time.monotonic() - start >= MINIGAME_WAIT_TIMEOUT:
+
+        elapsed = time.monotonic() - start
+
+        if elapsed >= MINIGAME_WAIT_TIMEOUT:
             print("MINIGAME WAIT TIMEOUT")
             return False
 
@@ -172,6 +215,7 @@ def wait_for_minigame():
         )
 
         if is_white(pixel):
+
             time.sleep(0.05)
 
             pixel2 = get_pixel(
@@ -193,6 +237,7 @@ def wait_for_minigame():
 # =========================
 
 def find_bar(bar_color):
+
     screenshot = pyautogui.screenshot()
 
     closest_match = None
@@ -200,16 +245,23 @@ def find_bar(bar_color):
 
     br, bg, bb = bar_color
 
-    for x in range(BAR_SCAN_LEFT, BAR_SCAN_RIGHT + 1):
-        r, g, b = screenshot.getpixel((x, BAR_Y))
+    for x in range(
+        BAR_SCAN_LEFT,
+        BAR_SCAN_RIGHT + 1
+    ):
+
+        r, g, b = screenshot.getpixel(
+            (x, BAR_Y)
+        )
 
         distance = (
-            abs(r - br) +
-            abs(g - bg) +
-            abs(b - bb)
+            abs(r - br)
+            + abs(g - bg)
+            + abs(b - bb)
         )
 
         if distance <= 15:
+
             if distance < closest_distance:
                 closest_distance = distance
                 closest_match = x
@@ -221,7 +273,10 @@ def find_bar(bar_color):
     right_x = closest_match
 
     while right_x < BAR_SCAN_RIGHT:
-        r, g, b = screenshot.getpixel((right_x + 1, BAR_Y))
+
+        r, g, b = screenshot.getpixel(
+            (right_x + 1, BAR_Y)
+        )
 
         if (
             abs(r - br) <= 10
@@ -240,16 +295,31 @@ def find_bar(bar_color):
 # =========================
 
 def find_line():
+
     screenshot = pyautogui.screenshot()
 
-    for x in range(BAR_SCAN_LEFT, BAR_SCAN_RIGHT + 1):
-        if IGNORE_LINE_LEFT <= x <= IGNORE_LINE_RIGHT:
+    for x in range(
+        BAR_SCAN_LEFT,
+        BAR_SCAN_RIGHT + 1
+    ):
+
+        if (
+            IGNORE_LINE_LEFT
+            <= x
+            <= IGNORE_LINE_RIGHT
+        ):
             continue
 
         found = False
 
-        for y in range(BAR_Y - LINE_MIN_HEIGHT, BAR_Y + LINE_MIN_HEIGHT + 1):
-            r, g, b = screenshot.getpixel((x, y))
+        for y in range(
+            BAR_Y - LINE_MIN_HEIGHT,
+            BAR_Y + LINE_MIN_HEIGHT + 1
+        ):
+
+            r, g, b = screenshot.getpixel(
+                (x, y)
+            )
 
             if (
                 r >= LINE_BRIGHTNESS
@@ -270,17 +340,20 @@ def find_line():
 # =========================
 
 def play_minigame():
+
     global rectangle_center_clicked
     global last_fallback_click
 
     print("STARTING MINIGAME")
 
-    # Move to the fishing bar once.
     move_mouse(950, 880)
 
     time.sleep(0.05)
 
-    bar_color = get_pixel(955, BAR_Y)
+    bar_color = get_pixel(
+        955,
+        BAR_Y
+    )
 
     if bar_color is None:
         print("COULD NOT READ BAR COLOR")
@@ -295,7 +368,9 @@ def play_minigame():
 
     while running:
 
-        if time.monotonic() - start_time >= MINIGAME_TIMEOUT:
+        elapsed = time.monotonic() - start_time
+
+        if elapsed >= MINIGAME_TIMEOUT:
             print("MINIGAME TIMEOUT")
             break
 
@@ -306,75 +381,132 @@ def play_minigame():
         # =====================
 
         if bar is not None:
+
             left_x, right_x = bar
+
             width = right_x - left_x
             center = (left_x + right_x) // 2
 
             print(
-                f"BAR FOUND: {left_x}-{right_x} "
-                f"Width={width} Center={center}"
+                f"BAR FOUND: "
+                f"{left_x}-{right_x} "
+                f"Width={width} "
+                f"Center={center}"
             )
 
             if width < 25:
 
-                # Rectangle overlaps center.
+                # Rectangle overlaps center
                 if (
                     left_x <= CENTER_X
                     and right_x >= CENTER_X
                 ):
+
                     if not rectangle_center_clicked:
-                        print("RECTANGLE CENTER -> CLICK ONCE")
+
+                        print(
+                            "RECTANGLE CENTER "
+                            "-> CLICK ONCE"
+                        )
+
                         click_mouse()
+
                         rectangle_center_clicked = True
+
                     else:
-                        print("RECTANGLE CENTER -> HOLD NO CLICK")
+
+                        print(
+                            "RECTANGLE CENTER "
+                            "-> HOLD NO CLICK"
+                        )
 
                 else:
+
                     rectangle_center_clicked = False
 
                     print("NORMAL CLICK")
+
                     click_mouse()
 
             else:
+
                 rectangle_center_clicked = False
-                print("TOO WIDE -> NO CLICK")
+
+                print(
+                    "TOO WIDE -> NO CLICK"
+                )
 
         # =====================
         # BAR HIDDEN
         # =====================
 
         else:
+
             rectangle_center_clicked = False
 
-            print("BAR HIDDEN -> LINE FALLBACK")
+            print(
+                "BAR HIDDEN "
+                "-> LINE FALLBACK"
+            )
 
             line_x = find_line()
 
             if line_x is not None:
-                print(f"LINE FOUND: {line_x}")
 
-                if line_x < CENTER_X - CENTER_TOLERANCE:
+                print(
+                    f"LINE FOUND: {line_x}"
+                )
+
+                # Line is left
+                if (
+                    line_x
+                    < CENTER_X - CENTER_TOLERANCE
+                ):
+
                     print("LINE LEFT -> CLICK")
 
                     now = time.monotonic()
 
-                    if now - last_fallback_click >= 0.20:
+                    if (
+                        now - last_fallback_click
+                        >= 0.20
+                    ):
+
                         click_mouse()
+
                         last_fallback_click = now
 
-                elif line_x > CENTER_X + CENTER_TOLERANCE:
-                    print("LINE RIGHT -> NO CLICK")
+                # Line is right
+                elif (
+                    line_x
+                    > CENTER_X + CENTER_TOLERANCE
+                ):
 
+                    print(
+                        "LINE RIGHT -> NO CLICK"
+                    )
+
+                # Line is centered
                 else:
-                    print("LINE CENTER -> CONTROLLED CLICK")
+
+                    print(
+                        "LINE CENTER "
+                        "-> CONTROLLED CLICK"
+                    )
 
                     now = time.monotonic()
 
-                    if now - last_fallback_click >= CENTER_FALLBACK_CLICK_INTERVAL:
+                    if (
+                        now - last_fallback_click
+                        >= CENTER_FALLBACK_CLICK_INTERVAL
+                    ):
+
                         click_mouse()
+
                         last_fallback_click = now
 
             else:
+
                 print("LINE HIDDEN")
 
         time.sleep(0.01)
@@ -385,44 +517,65 @@ def play_minigame():
 # =========================
 
 def fishing_cycle():
+
     global running
 
     print("\nFISH BUTTON CLICK")
 
-    move_mouse(FISH_X, FISH_Y)
+    # Move to Fish
+    move_mouse(
+        FISH_X,
+        FISH_Y
+    )
+
     click_mouse()
 
-    time.sleep(0.35)
+    # Give Roblox a little time to open
+    time.sleep(0.50)
 
     if not wait_for_minigame():
-        print("MINIGAME DID NOT START")
+
+        print(
+            "MINIGAME DID NOT START"
+        )
+
         running = False
+
         print("MACRO PAUSED")
+
         return
 
+    # Play
     play_minigame()
 
     if not running:
         return
 
     # =========================
-    # FAST X CLICK
+    # FAST X
     # =========================
 
-    # The minigame is finished.
-    # Don't wait around for the X.
-    time.sleep(0.10)
+    print("MINIGAME FINISHED")
 
-    move_mouse(X_BUTTON_X, X_BUTTON_Y)
+    # Very short pause
+    time.sleep(0.05)
 
-    time.sleep(0.15)
+    # Move quickly to X
+    move_mouse_fast(
+        X_BUTTON_X,
+        X_BUTTON_Y
+    )
+
+    # Tiny delay so cursor reaches X
+    time.sleep(0.05)
 
     click_mouse()
 
     print("X CLICKED")
 
-    # Short delay before starting next fish.
-    time.sleep(0.20)
+    # Give the game time to reset
+    # before clicking Fish again.
+    time.sleep(AFTER_X_DELAY)
 
 
 # =========================
@@ -430,6 +583,7 @@ def fishing_cycle():
 # =========================
 
 def fishing_loop():
+
     global running
 
     cycle = 0
@@ -441,12 +595,16 @@ def fishing_loop():
     while not stop_requested:
 
         if not running:
+
             time.sleep(0.1)
+
             continue
 
         cycle += 1
 
-        print(f"\n========== CYCLE {cycle} ==========")
+        print(
+            f"\n========== CYCLE {cycle} =========="
+        )
 
         fishing_cycle()
 
