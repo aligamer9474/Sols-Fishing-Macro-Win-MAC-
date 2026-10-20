@@ -35,13 +35,15 @@ CENTER_TOLERANCE = 12
 LINE_BRIGHTNESS = 215
 LINE_MIN_HEIGHT = 5
 
-# Ignore the area that was producing false line detections
 IGNORE_LINE_LEFT = 765
 IGNORE_LINE_RIGHT = 800
 
-# Only used when the rectangle is NOT detected
 CENTER_FALLBACK_CLICK_INTERVAL = 0.20
 
+# How long to wait for the minigame
+MINIGAME_WAIT_TIMEOUT = 15.0
+
+# How long the actual minigame can run
 MINIGAME_TIMEOUT = 9.0
 
 
@@ -64,6 +66,7 @@ def get_mouse_position():
 
 def move_mouse_native(target_x, target_y):
     while running and not emergency_stop:
+
         current_x, current_y = get_mouse_position()
 
         dx = target_x - current_x
@@ -193,13 +196,16 @@ def color_matches(color, target, tolerance):
 # =========================
 
 def find_bar(bar_color):
+
     screenshot = pyautogui.screenshot()
 
     left_x = None
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
-        color = screenshot.getpixel((x, BAR_Y))
+        color = screenshot.getpixel(
+            (x, BAR_Y)
+        )
 
         if color_matches(
             color,
@@ -239,14 +245,18 @@ def find_bar(bar_color):
 # =========================
 
 def find_player_line():
+
     screenshot = pyautogui.screenshot()
 
     candidates = []
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
-        # Ignore the area that causes false detections
-        if IGNORE_LINE_LEFT <= x <= IGNORE_LINE_RIGHT:
+        if (
+            IGNORE_LINE_LEFT
+            <= x
+            <= IGNORE_LINE_RIGHT
+        ):
             continue
 
         bright_count = 0
@@ -270,8 +280,8 @@ def find_player_line():
     if not candidates:
         return None
 
-    # Group nearby pixels
     groups = []
+
     current_group = [candidates[0]]
 
     for x in candidates[1:]:
@@ -284,15 +294,14 @@ def find_player_line():
 
     groups.append(current_group)
 
-    # Use the strongest group
     strongest = max(
         groups,
         key=len
     )
 
     return (
-        strongest[0] +
-        strongest[-1]
+        strongest[0]
+        + strongest[-1]
     ) // 2
 
 
@@ -310,7 +319,7 @@ def center_fallback(
 
     distance = line_x - CENTER_X
 
-    # Line is left of center
+    # LEFT
     if distance < -CENTER_TOLERANCE:
 
         native_click()
@@ -322,7 +331,7 @@ def center_fallback(
 
         return time.monotonic()
 
-    # Line is right of center
+    # RIGHT
     if distance > CENTER_TOLERANCE:
 
         print(
@@ -332,7 +341,7 @@ def center_fallback(
 
         return last_fallback_click
 
-    # Line is centered
+    # CENTER
     now = time.monotonic()
 
     if (
@@ -358,6 +367,8 @@ def center_fallback(
 
 def wait_for_minigame():
 
+    print("WAITING FOR MINIGAME...")
+
     start_time = time.monotonic()
 
     while running and not emergency_stop:
@@ -368,12 +379,25 @@ def wait_for_minigame():
         )
 
         if is_white(color):
+
+            print("MINIGAME DETECTED")
+
             return True
 
-        if time.monotonic() - start_time > 5:
+        # Patiently wait instead of
+        # starting another fishing cycle
+        if (
+            time.monotonic() - start_time
+            > MINIGAME_WAIT_TIMEOUT
+        ):
+
+            print(
+                "MINIGAME WAIT TIMEOUT"
+            )
+
             return False
 
-        time.sleep(0.02)
+        time.sleep(0.05)
 
     return False
 
@@ -386,18 +410,22 @@ def run_fishing_minigame():
 
     global running
 
+    # Wait patiently
     if not wait_for_minigame():
-        print("MINIGAME NOT FOUND")
-        return
 
-    print("MINIGAME DETECTED")
+        # IMPORTANT:
+        # Do NOT let the main loop immediately
+        # click Fish again.
+        return False
 
-    # Move to the fishing bar once
-    move_mouse_native(950, 880)
+    # Move to the fishing bar
+    move_mouse_native(
+        950,
+        880
+    )
 
     time.sleep(0.05)
 
-    # Sample the rectangle color
     bar_color = get_pixel(
         BAR_SAMPLE_X,
         BAR_SAMPLE_Y
@@ -411,26 +439,26 @@ def run_fishing_minigame():
 
     last_fallback_click = 0.0
 
-    # IMPORTANT:
-    # Prevents repeated clicking while the
-    # rectangle remains centered.
     rectangle_center_clicked = False
 
     while running and not emergency_stop:
 
-        # Safety timeout
         if (
             time.monotonic() - start_time
             > MINIGAME_TIMEOUT
         ):
-            print("MINIGAME TIMEOUT")
+
+            print(
+                "MINIGAME TIMEOUT"
+            )
+
             break
 
         bar = find_bar(bar_color)
 
-        # ==================================
-        # RECTANGLE DETECTED
-        # ==================================
+        # =========================
+        # RECTANGLE FOUND
+        # =========================
 
         if bar is not None:
 
@@ -449,13 +477,9 @@ def run_fishing_minigame():
                 f"Center={bar_center}"
             )
 
-            # Rectangle is small enough to click
             if width < ADVANCED_THRESHOLD:
 
-                # ----------------------------------
-                # RECTANGLE IS IN THE MIDDLE
-                # ----------------------------------
-
+                # Rectangle overlaps center
                 if (
                     left_x <= CENTER_X
                     <= right_x
@@ -479,15 +503,8 @@ def run_fishing_minigame():
                             "-> HOLD NO CLICK"
                         )
 
-                # ----------------------------------
-                # RECTANGLE IS NOT CENTERED
-                # ----------------------------------
-
                 else:
 
-                    # Reset this so the next time
-                    # it reaches center, it gets
-                    # exactly one click.
                     rectangle_center_clicked = False
 
                     native_click()
@@ -499,7 +516,6 @@ def run_fishing_minigame():
 
             else:
 
-                # Rectangle is too wide to click
                 rectangle_center_clicked = False
 
                 print(
@@ -507,15 +523,15 @@ def run_fishing_minigame():
                     "-> NO CLICK"
                 )
 
-            # Rectangle is visible again,
-            # so fallback line control stops.
+            # Rectangle is visible.
+            # Fallback is not used.
             last_fallback_click = (
                 time.monotonic()
             )
 
-        # ==================================
-        # RECTANGLE NOT DETECTED
-        # ==================================
+        # =========================
+        # RECTANGLE HIDDEN
+        # =========================
 
         else:
 
@@ -565,6 +581,8 @@ def run_fishing_minigame():
 
         time.sleep(0.30)
 
+    return True
+
 
 # =========================
 # MAIN FISHING LOOP
@@ -577,7 +595,9 @@ def fishing_loop():
     while not emergency_stop:
 
         if not running:
+
             time.sleep(0.1)
+
             continue
 
         cycle_count += 1
@@ -595,15 +615,36 @@ def fishing_loop():
 
         time.sleep(0.05)
 
-        # Click Fish
+        # CLICK FISH ONCE
         native_click()
 
-        print("FISH BUTTON CLICKED")
+        print(
+            "FISH BUTTON CLICKED"
+        )
 
-        time.sleep(0.05)
+        # Give Roblox time to open
+        # the minigame
+        time.sleep(0.20)
 
-        # Run minigame
-        run_fishing_minigame()
+        # Wait for the minigame.
+        # We DO NOT click Fish again
+        # while waiting.
+        success = run_fishing_minigame()
+
+        if not success:
+
+            print(
+                "MINIGAME DID NOT START."
+            )
+
+            print(
+                "PAUSING MACRO "
+                "TO PREVENT REPEATED FISH CLICKS."
+            )
+
+            running = False
+
+            continue
 
         time.sleep(0.10)
 
@@ -619,7 +660,9 @@ print("F8 = Start / Pause")
 print("F3 = Emergency Stop")
 print("================================")
 
+
 try:
+
     fishing_loop()
 
 except KeyboardInterrupt:
