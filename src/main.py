@@ -1,6 +1,5 @@
 import time
 import ctypes
-import ctypes.wintypes
 import pyautogui
 import keyboard
 
@@ -37,7 +36,6 @@ FALLBACK_CLICK_DELAY = 0.20
 
 ADVANCED_THRESHOLD = 25
 
-# Ignore fake line detections around these areas
 IGNORE_LINE_LEFT = 765
 IGNORE_LINE_RIGHT = 800
 
@@ -70,11 +68,6 @@ def get_mouse_position():
 
 
 def move_mouse_native(target_x, target_y):
-    """
-    Moves using relative mouse_event movement.
-    This is the method that Roblox actually recognized.
-    """
-
     while True:
         current_x, current_y = get_mouse_position()
 
@@ -197,14 +190,6 @@ def color_matches(color1, color2, tolerance=10):
 # ============================================================
 
 def get_bar_color():
-    """
-    IMPORTANT:
-    We do NOT wait for a special purple color anymore.
-
-    The old working behavior samples the bar immediately
-    after the minigame starts.
-    """
-
     color = get_pixel(BAR_SAMPLE_X, BAR_SAMPLE_Y)
 
     if color is not None:
@@ -229,7 +214,6 @@ def find_rectangle(bar_color):
     left_x = None
     right_x = None
 
-    # Find left edge
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
         color = get_pixel(x, BAR_Y)
@@ -241,7 +225,6 @@ def find_rectangle(bar_color):
     if left_x is None:
         return None
 
-    # Find right edge
     right_x = left_x
 
     for x in range(left_x + 1, BAR_RIGHT + 1):
@@ -263,12 +246,6 @@ def find_rectangle(bar_color):
 # ============================================================
 
 def find_player_line():
-    """
-    Looks for the player's vertical line.
-
-    The fake detections near the extreme left/right
-    sides are ignored.
-    """
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
@@ -278,7 +255,6 @@ def find_player_line():
         if IGNORE_LINE_RIGHT_START <= x <= IGNORE_LINE_RIGHT_END:
             continue
 
-        # Look at a few pixels vertically around the bar
         for y in range(BAR_Y - 5, BAR_Y + 6):
 
             color = get_pixel(x, y)
@@ -288,7 +264,6 @@ def find_player_line():
 
             r, g, b = color
 
-            # Player line is generally bright/white
             if r >= 210 and g >= 210 and b >= 210:
                 return x
 
@@ -300,6 +275,7 @@ def find_player_line():
 # ============================================================
 
 def wait_for_minigame():
+
     print("WAITING FOR MINIGAME...")
 
     start_time = time.time()
@@ -319,7 +295,6 @@ def wait_for_minigame():
 
                 print("MINIGAME DETECTED")
 
-                # Put cursor where the old macro expected it.
                 move_mouse_native(950, 880)
 
                 time.sleep(0.05)
@@ -348,7 +323,6 @@ def run_fishing_minigame():
 
     print("GETTING BAR COLOR...")
 
-    # Immediately sample the bar.
     bar_color = get_bar_color()
 
     if bar_color is None:
@@ -367,19 +341,11 @@ def run_fishing_minigame():
 
     while running and not stop_requested:
 
-        # ----------------------------------------------------
-        # TIMEOUT
-        # ----------------------------------------------------
-
         if time.time() - start_time >= MINIGAME_TIMEOUT:
 
             print("MINIGAME TIMEOUT")
 
             return False
-
-        # ----------------------------------------------------
-        # FIND RECTANGLE
-        # ----------------------------------------------------
 
         rectangle = find_rectangle(bar_color)
 
@@ -387,12 +353,11 @@ def run_fishing_minigame():
 
             left_x, right_x, width = rectangle
 
-            # Rectangle exists, so it is NOT hidden.
             bar_hidden_since = None
 
-            # -----------------------------------------------
-            # RECTANGLE IS CENTERED
-            # -----------------------------------------------
+            # ------------------------------------------------
+            # RECTANGLE CENTERED
+            # ------------------------------------------------
 
             if left_x <= CENTER_X <= right_x:
 
@@ -407,22 +372,15 @@ def run_fishing_minigame():
 
                     rectangle_center_clicked = True
 
-                # IMPORTANT:
-                # Do NOT keep clicking while centered.
-
                 time.sleep(0.01)
 
                 continue
 
-            # -----------------------------------------------
-            # RECTANGLE MOVED AWAY FROM CENTER
-            # -----------------------------------------------
+            # ------------------------------------------------
+            # RECTANGLE MOVED AWAY
+            # ------------------------------------------------
 
             rectangle_center_clicked = False
-
-            # -----------------------------------------------
-            # NORMAL ADVANCED DETECTION
-            # -----------------------------------------------
 
             if width < ADVANCED_THRESHOLD:
 
@@ -435,9 +393,6 @@ def run_fishing_minigame():
 
                 time.sleep(0.025)
 
-            # Wide rectangle:
-            # do not click.
-
             time.sleep(0.01)
 
             continue
@@ -449,11 +404,10 @@ def run_fishing_minigame():
         if bar_hidden_since is None:
             bar_hidden_since = time.time()
 
-        # Find player line
         line_x = find_player_line()
 
         # ----------------------------------------------------
-        # BOTH BAR AND LINE HIDDEN
+        # BAR + LINE BOTH HIDDEN
         # ----------------------------------------------------
 
         if line_x is None:
@@ -475,10 +429,9 @@ def run_fishing_minigame():
             continue
 
         # ----------------------------------------------------
-        # LINE FOUND
+        # LINE LEFT
         # ----------------------------------------------------
 
-        # LINE IS FAR LEFT
         if line_x < CENTER_X - 15:
 
             now = time.time()
@@ -494,13 +447,18 @@ def run_fishing_minigame():
                     f"x={line_x} -> CLICK"
                 )
 
-        # LINE IS FAR RIGHT
+        # ----------------------------------------------------
+        # LINE RIGHT
+        # ----------------------------------------------------
+
         elif line_x > CENTER_X + 15:
 
-            # Do NOT click.
             pass
 
-        # LINE IS IN THE CENTER
+        # ----------------------------------------------------
+        # LINE CENTER
+        # ----------------------------------------------------
+
         else:
 
             now = time.time()
@@ -526,6 +484,8 @@ def run_fishing_minigame():
 # ============================================================
 
 def fishing_loop():
+
+    global running
 
     cycle = 0
 
@@ -563,7 +523,9 @@ def fishing_loop():
                 break
 
             print("MINIGAME DID NOT START.")
+
             running = False
+
             break
 
         # ----------------------------------------------------
@@ -578,7 +540,9 @@ def fishing_loop():
         if not caught:
 
             print("MINIGAME FAILED.")
+
             running = False
+
             break
 
         # ----------------------------------------------------
@@ -589,7 +553,6 @@ def fishing_loop():
 
         time.sleep(0.50)
 
-        # Move to result X
         move_mouse_native(
             RESULT_X,
             RESULT_Y
