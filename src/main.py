@@ -30,19 +30,13 @@ SCAN_DELAY = 0.010
 
 COLOR_TOLERANCE = 10
 
-REARM_DELAY = 0.08
-
-# Panic speed
+# Panic requested by user
 PANIC_COOLDOWN = 0.30
-PANIC_MAX_TIME = 1.50
+PANIC_MAX_TIME = 1.0
 
 RESULT_CLOSE_DELAY = 0.40
 
 INITIAL_GRACE_PERIOD = 1.20
-MOVEMENT_REQUIRED = 8
-
-PREDICTION_TIME = 0.30
-MIN_DISTANCE_TO_PREDICT = 8
 
 
 # ============================================================
@@ -65,52 +59,64 @@ def get_mouse_position():
     return point.x, point.y
 
 
+def send_relative_move(dx, dy):
+
+    if dx == 0 and dy == 0:
+        return
+
+    user32.mouse_event(
+        MOUSEEVENTF_MOVE,
+        int(dx),
+        int(dy),
+        0,
+        0
+    )
+
+
 def move_mouse_native(target_x, target_y):
 
     """
-    Uses the same native relative-movement method that
-    successfully made Roblox recognize the mouse.
+    Moves using the native relative mouse input that Roblox
+    recognizes.
 
-    Smaller steps prevent the cursor from accelerating
-    past the target.
+    IMPORTANT:
+    The cursor position is checked after every movement.
+    This prevents Windows mouse acceleration from causing
+    the cursor to fly past the target.
     """
 
-    current_x, current_y = get_mouse_position()
+    max_iterations = 500
 
-    dx = target_x - current_x
-    dy = target_y - current_y
-
-    distance = max(abs(dx), abs(dy))
-
-    if distance == 0:
-        return
-
-    # Small steps = slower, more controlled movement.
-    steps = max(1, int(distance / 3))
-
-    for i in range(1, steps + 1):
+    for _ in range(max_iterations):
 
         if emergency_stop:
-            return
+            return False
 
-        new_x = current_x + int(dx * i / steps)
-        new_y = current_y + int(dy * i / steps)
+        current_x, current_y = get_mouse_position()
 
-        previous_x = current_x + int(dx * (i - 1) / steps)
-        previous_y = current_y + int(dy * (i - 1) / steps)
+        dx = target_x - current_x
+        dy = target_y - current_y
 
-        move_x = new_x - previous_x
-        move_y = new_y - previous_y
+        # We are close enough.
+        if abs(dx) <= 2 and abs(dy) <= 2:
+            return True
 
-        user32.mouse_event(
-            MOUSEEVENTF_MOVE,
-            move_x,
-            move_y,
-            0,
-            0
-        )
+        # ----------------------------------------------------
+        # Controlled movement
+        #
+        # Never send a huge relative movement.
+        # Keep each movement small so acceleration can't
+        # launch the cursor way past the target.
+        # ----------------------------------------------------
+
+        move_x = max(-3, min(3, dx))
+        move_y = max(-3, min(3, dy))
+
+        send_relative_move(move_x, move_y)
 
         time.sleep(0.004)
+
+    return False
 
 
 def native_click():
@@ -301,9 +307,11 @@ def find_bar_2d():
     for x in matching_x[1:]:
 
         if x == previous + 1:
+
             previous = x
 
         else:
+
             groups.append((group_start, previous))
 
             group_start = x
@@ -381,7 +389,7 @@ def play_fishing_minigame():
     print()
     print("======================================")
     print("FISHING MINIGAME")
-    print("PREDICTIVE DETECTION")
+    print("BASIC ADVANCED DETECTION")
     print("CLICKS ENABLED")
     print("======================================")
 
@@ -408,19 +416,8 @@ def play_fishing_minigame():
 
     danger_locked = False
 
-    previous_center = None
-    previous_time = None
-
-    velocity = 0
-
-    rectangle_seen = False
-    rectangle_moved = False
-
     panic_mode = False
-    panic_start_time = 0
     last_panic_click = 0
-
-    last_predictive_click = 0
 
     while (
         running
@@ -440,54 +437,22 @@ def play_fishing_minigame():
 
                 continue
 
-            result_2d = find_bar_2d()
-
-            if result_2d is not None:
-                result = result_2d
+            result = find_bar_2d()
 
         if result is not None:
 
             left_x, right_x, width = result
 
-            center = (left_x + right_x) / 2
-
-            rectangle_seen = True
-
-            # ------------------------------------------------
-            # MOVEMENT TRACKING
-            # ------------------------------------------------
-
-            if previous_center is not None and previous_time is not None:
-
-                dt = now - previous_time
-
-                if dt > 0:
-
-                    movement = center - previous_center
-
-                    if abs(movement) >= MOVEMENT_REQUIRED:
-
-                        rectangle_moved = True
-
-                    instant_velocity = movement / dt
-
-                    velocity = (
-                        velocity * 0.65
-                        +
-                        instant_velocity * 0.35
-                    )
-
-            previous_center = center
-            previous_time = now
-
-            # ------------------------------------------------
-            # NORMAL DETECTION
-            # ------------------------------------------------
-
             print(
                 f"Bar X={left_x}-{right_x} "
                 f"Width={width}"
             )
+
+            panic_mode = False
+
+            # -----------------------------------------------
+            # CLICK WHEN BAR IS GETTING TOO SMALL
+            # -----------------------------------------------
 
             if width < ADVANCED_FISHING_THRESHOLD:
 
@@ -505,132 +470,40 @@ def play_fishing_minigame():
 
                     danger_locked = True
 
-                panic_mode = False
-
             else:
 
                 danger_locked = False
 
-                # ------------------------------------------------
-                # PREDICTIVE CLICK
-                # ------------------------------------------------
-
-                if rectangle_moved:
-
-                    if velocity > 20:
-
-                        predicted_center = (
-                            center
-                            +
-                            velocity * PREDICTION_TIME
-                        )
-
-                        if (
-                            predicted_center - center
-                            >= MIN_DISTANCE_TO_PREDICT
-                        ):
-
-                            if (
-                                now - last_predictive_click
-                                >= PANIC_COOLDOWN
-                            ):
-
-                                native_click()
-
-                                click_count += 1
-
-                                print(
-                                    f"PREDICTIVE CLICK "
-                                    f"#{click_count} | "
-                                    f"Center={center:.0f} | "
-                                    f"Velocity={velocity:.0f} | "
-                                    f"Predicted={predicted_center:.0f}"
-                                )
-
-                                last_predictive_click = now
-
-                    elif velocity < -20:
-
-                        predicted_center = (
-                            center
-                            +
-                            velocity * PREDICTION_TIME
-                        )
-
-                        if (
-                            center - predicted_center
-                            >= MIN_DISTANCE_TO_PREDICT
-                        ):
-
-                            if (
-                                now - last_predictive_click
-                                >= PANIC_COOLDOWN
-                            ):
-
-                                native_click()
-
-                                click_count += 1
-
-                                print(
-                                    f"PREDICTIVE CLICK "
-                                    f"#{click_count} | "
-                                    f"Center={center:.0f} | "
-                                    f"Velocity={velocity:.0f} | "
-                                    f"Predicted={predicted_center:.0f}"
-                                )
-
-                                last_predictive_click = now
-
-            panic_mode = False
-
         else:
 
-            # ====================================================
-            # RECTANGLE HIDDEN
-            # ====================================================
+            # -----------------------------------------------
+            # PANIC FALLBACK
+            #
+            # This is deliberately limited. We don't want
+            # blind clicking to take over the entire minigame.
+            # -----------------------------------------------
 
-            if rectangle_seen and rectangle_moved:
+            if not panic_mode:
 
-                if not panic_mode:
+                panic_mode = True
 
-                    panic_mode = True
-                    panic_start_time = now
+                print(
+                    "Rectangle hidden - "
+                    "limited panic mode."
+                )
 
-                    print(
-                        "Rectangle hidden - "
-                        "predictive panic mode."
-                    )
+            if now - last_panic_click >= PANIC_COOLDOWN:
 
-                panic_elapsed = now - panic_start_time
+                native_click()
 
-                if panic_elapsed <= PANIC_MAX_TIME:
+                click_count += 1
 
-                    if (
-                        now - last_panic_click
-                        >= PANIC_COOLDOWN
-                    ):
+                print(
+                    f"PANIC CLICK #{click_count} | "
+                    f"Cooldown: {PANIC_COOLDOWN:.2f}s"
+                )
 
-                        native_click()
-
-                        click_count += 1
-
-                        print(
-                            f"PREDICTIVE PANIC CLICK "
-                            f"#{click_count} | "
-                            f"Cooldown: "
-                            f"{PANIC_COOLDOWN:.2f}s"
-                        )
-
-                        last_panic_click = now
-
-                else:
-
-                    panic_mode = False
-
-                    print(
-                        "Prediction timeout - "
-                        "waiting for rectangle."
-                    )
+                last_panic_click = now
 
         time.sleep(SCAN_DELAY)
 
@@ -676,6 +549,9 @@ def close_fish_result():
         FISH_RESULT_CLOSE[1]
     )
 
+    if emergency_stop:
+        return
+
     time.sleep(0.05)
 
     native_click()
@@ -701,12 +577,27 @@ def fishing_cycle(cycle_number):
 
     print("Moving to Fish button...")
 
-    move_mouse_native(
+    success = move_mouse_native(
         FISH_BUTTON[0],
         FISH_BUTTON[1]
     )
 
     if emergency_stop:
+        return
+
+    current_x, current_y = get_mouse_position()
+
+    print(
+        f"Mouse position after movement: "
+        f"({current_x}, {current_y})"
+    )
+
+    if not success:
+
+        print(
+            "WARNING: Could not reach Fish button."
+        )
+
         return
 
     time.sleep(0.05)
@@ -774,7 +665,6 @@ def toggle_macro():
         print()
         print("Macro STARTED.")
 
-        # Run macro separately so F3 remains responsive.
         macro_thread = threading.Thread(
             target=macro_loop,
             daemon=True
@@ -791,7 +681,7 @@ def toggle_macro():
 
 
 # ============================================================
-# F3 EMERGENCY STOP
+# F3
 # ============================================================
 
 def emergency():
@@ -821,12 +711,12 @@ print(
     f"Advanced threshold: "
     f"{ADVANCED_FISHING_THRESHOLD} pixels"
 )
-print("Predictive clicking enabled.")
+print("Basic advanced detection enabled.")
 print(
     f"Panic cooldown: "
     f"{PANIC_COOLDOWN:.2f} seconds"
 )
-print("F3 emergency stop is threaded.")
+print("Mouse position correction enabled.")
 print(
     f"Result close delay: "
     f"{RESULT_CLOSE_DELAY:.2f} seconds"
