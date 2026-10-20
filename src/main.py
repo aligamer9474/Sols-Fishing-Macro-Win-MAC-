@@ -38,9 +38,6 @@ MINIGAME_TIME = 9.0
 
 SUCCESS_CLICK_DELAY = 0.025
 
-# Panic clicks are slower.
-PANIC_CLICK_DELAY = 0.35
-
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
 
@@ -294,7 +291,7 @@ def fishing_minigame():
     detections = 0
     missed_scans = 0
 
-    last_panic_click = 0
+    center_reached = False
 
     while (
         running
@@ -315,8 +312,6 @@ def fishing_minigame():
             screenshot,
             bar_color
         )
-
-        now = time.time()
 
         if result is not None:
 
@@ -341,6 +336,8 @@ def fishing_minigame():
                     f"CLICK #{total_clicks}"
                 )
 
+                center_reached = False
+
                 time.sleep(
                     SUCCESS_CLICK_DELAY
                 )
@@ -350,31 +347,30 @@ def fishing_minigame():
             missed_scans += 1
 
             # =================================================
-            # ONLY CHANGE:
-            # When the rectangle is hidden by the timer,
-            # move to the exact center of the fishing bar
-            # and use slow panic clicks there.
+            # NO PANIC CLICKING
+            #
+            # If the rectangle is hidden by the timer,
+            # simply move toward the center of the bar.
+            # DO NOT CLICK.
             # =================================================
 
-            if (
-                now - last_panic_click
-                >= PANIC_CLICK_DELAY
-            ):
+            if not center_reached:
+
+                print(
+                    "BAR NOT DETECTED - "
+                    "moving toward center"
+                )
 
                 move_mouse_native(
                     BAR_CENTER_X,
                     BAR_CENTER_Y
                 )
 
-                native_click()
-
-                total_clicks += 1
-
-                last_panic_click = now
+                center_reached = True
 
                 print(
-                    f"PANIC CLICK #{total_clicks} "
-                    f"(center)"
+                    f"Mouse at center: "
+                    f"({BAR_CENTER_X}, {BAR_CENTER_Y})"
                 )
 
         time.sleep(0.01)
@@ -557,8 +553,8 @@ print("Old AHK fishing detection restored.")
 print("Rectangle detection unchanged.")
 print("Mouse does NOT follow the rectangle.")
 print("Success clicks: 25ms apart.")
-print("Panic clicks: 350ms apart.")
-print("Panic clicks target the bar center.")
+print("NO panic clicking.")
+print("When bar is hidden, mouse moves to center.")
 print("No dynamic color re-learning.")
 print(
     f"Fishing line: "
