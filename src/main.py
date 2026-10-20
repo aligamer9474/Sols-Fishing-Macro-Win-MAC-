@@ -38,6 +38,9 @@ CENTER_TOLERANCE = 8
 LINE_BRIGHTNESS = 215
 LINE_MIN_HEIGHT = 5
 
+# Ignore suspicious fallback detections
+MAX_LINE_JUMP = 35
+
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
 
@@ -181,7 +184,6 @@ def wait_for_minigame():
             print(
                 f"Still waiting... {elapsed:.1f}s"
             )
-
             last_status = elapsed
 
         time.sleep(0.03)
@@ -331,7 +333,6 @@ def find_player_line():
 
         else:
             groups.append(current_group)
-
             current_group = [x]
 
     groups.append(current_group)
@@ -354,78 +355,120 @@ def find_player_line():
 # CENTER FALLBACK
 # =========================
 
-def center_fallback(last_center_click):
+def center_fallback(
+    last_line_position,
+    last_center_click
+):
 
     line_position = find_player_line()
 
-    # ---------------------------------
-    # LINE IS VISIBLE
-    # ---------------------------------
-
-    if line_position is not None:
-
-        distance = line_position - CENTER_X
+    # Nothing visible
+    if line_position is None:
 
         print(
-            f"LINE FOUND: {line_position} "
-            f"| Center={CENTER_X} "
-            f"| Distance={distance}"
+            "LINE HIDDEN - WAITING FOR LINE"
         )
 
-        # Line is LEFT of center
-        if distance < -CENTER_TOLERANCE:
-
-            print(
-                "Line LEFT of center - CLICKING"
-            )
-
-            native_click()
-
-            return time.time()
-
-        # Line is RIGHT of center
-        elif distance > CENTER_TOLERANCE:
-
-            print(
-                "Line RIGHT of center - NOT CLICKING"
-            )
-
-            return last_center_click
-
-        # Line is at center
-        else:
-
-            now = time.time()
-
-            if (
-                now - last_center_click
-                >= CENTER_CLICK_INTERVAL
-            ):
-
-                print(
-                    "Line at CENTER - CENTER CLICK"
-                )
-
-                native_click()
-
-                return now
-
-            return last_center_click
+        return (
+            last_line_position,
+            last_center_click
+        )
 
     # ---------------------------------
-    # LINE IS HIDDEN
+    # REJECT SUSPICIOUS JUMPS
     # ---------------------------------
 
-    # IMPORTANT:
-    # Do NOT use the last known position.
-    # Do NOT click while the line is hidden.
-    # Simply wait for it to become visible again.
+    if last_line_position is not None:
 
-    print(
-        "LINE HIDDEN - WAITING FOR LINE"
+        jump = abs(
+            line_position
+            - last_line_position
+        )
+
+        if jump > MAX_LINE_JUMP:
+
+            print(
+                f"LINE REJECTED: "
+                f"{line_position} "
+                f"(jump={jump})"
+            )
+
+            return (
+                last_line_position,
+                last_center_click
+            )
+
+    last_line_position = line_position
+
+    distance = (
+        line_position
+        - CENTER_X
     )
 
-    return last_center_click
+    print(
+        f"LINE FOUND: {line_position} "
+        f"| Center={CENTER_X} "
+        f"| Distance={distance}"
+    )
+
+    # ---------------------------------
+    # LEFT OF CENTER
+    # ---------------------------------
+
+    if distance < -CENTER_TOLERANCE:
+
+        print(
+            "Line LEFT of center - CLICKING"
+        )
+
+        native_click()
+
+        return (
+            last_line_position,
+            time.time()
+        )
+
+    # ---------------------------------
+    # RIGHT OF CENTER
+    # ---------------------------------
+
+    if distance > CENTER_TOLERANCE:
+
+        print(
+            "Line RIGHT of center - NOT CLICKING"
+        )
+
+        return (
+            last_line_position,
+            last_center_click
+        )
+
+    # ---------------------------------
+    # CENTER
+    # ---------------------------------
+
+    now = time.time()
+
+    if (
+        now - last_center_click
+        >= CENTER_CLICK_INTERVAL
+    ):
+
+        print(
+            "Line at CENTER - CENTER CLICK"
+        )
+
+        native_click()
+
+        return (
+            last_line_position,
+            now
+        )
+
+    return (
+        last_line_position,
+        last_center_click
+    )
 
 
 # =========================
@@ -463,6 +506,7 @@ def fishing_minigame():
     detections = 0
     missed_scans = 0
 
+    last_line_position = None
     last_center_click = 0
 
     while (
@@ -525,7 +569,11 @@ def fishing_minigame():
 
             missed_scans += 1
 
-            last_center_click = center_fallback(
+            (
+                last_line_position,
+                last_center_click
+            ) = center_fallback(
+                last_line_position,
                 last_center_click
             )
 
@@ -640,7 +688,7 @@ def fishing_cycle():
 
 
 # =========================
-# MAIN MACRO LOOP
+# MAIN LOOP
 # =========================
 
 def macro_loop():
@@ -709,7 +757,7 @@ def emergency():
 
 
 # =========================
-# START PROGRAM
+# START
 # =========================
 
 print("======================================")
@@ -724,6 +772,14 @@ print(
 )
 
 print(
+    "Single-click detection only."
+)
+
+print(
+    "NO double-clicking."
+)
+
+print(
     "Mouse does NOT move during the minigame."
 )
 
@@ -732,7 +788,7 @@ print(
 )
 
 print(
-    "No rapid clicking when line disappears."
+    "Suspicious line jumps are ignored."
 )
 
 print(
@@ -752,16 +808,12 @@ print(
 )
 
 print(
-    "Hidden-bar fallback waits for "
-    "the line to return."
-)
-
-print(
     "Result X has old 300ms/700ms timing."
 )
 
 print("======================================")
 print()
+
 
 keyboard.add_hotkey(
     "f8",
@@ -772,6 +824,7 @@ keyboard.add_hotkey(
     "f3",
     emergency
 )
+
 
 try:
 
