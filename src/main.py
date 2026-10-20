@@ -38,13 +38,15 @@ LINE_MIN_HEIGHT = 5
 IGNORE_LINE_LEFT = 765
 IGNORE_LINE_RIGHT = 800
 
+# Ignore the fake post-minigame line
+FAKE_LINE_LEFT = 1100
+FAKE_LINE_RIGHT = 1161
+
 CENTER_FALLBACK_CLICK_INTERVAL = 0.20
 
-# Be patient
-MINIGAME_WAIT_TIMEOUT = 20.0
-MINIGAME_TIMEOUT = 20.0
+MINIGAME_WAIT_TIMEOUT = 15.0
+MINIGAME_TIMEOUT = 15.0
 
-# Give Roblox time to open the minigame
 AFTER_FISH_DELAY = 0.50
 
 
@@ -201,6 +203,71 @@ def color_matches(color, target, tolerance):
 
 
 # =========================
+# CHECK IF COLOR LOOKS LIKE
+# THE PURPLE FISHING BAR
+# =========================
+
+def looks_like_bar_color(color):
+
+    r, g, b = color
+
+    # The previous bad sample was:
+    # (32, 22, 53)
+    #
+    # Real bar colors are much brighter
+    # and have a visible purple difference.
+
+    return (
+        r >= 70 and
+        g >= 35 and
+        b >= 70 and
+        r > g + 20 and
+        b > g + 20
+    )
+
+
+# =========================
+# WAIT FOR REAL BAR COLOR
+# =========================
+
+def get_bar_color():
+
+    print("WAITING FOR BAR COLOR...")
+
+    start_time = time.monotonic()
+
+    while running and not emergency_stop:
+
+        color = get_pixel(
+            BAR_SAMPLE_X,
+            BAR_SAMPLE_Y
+        )
+
+        if looks_like_bar_color(color):
+
+            print(
+                f"BAR COLOR FOUND: {color}"
+            )
+
+            return color
+
+        if (
+            time.monotonic() - start_time
+            > MINIGAME_WAIT_TIMEOUT
+        ):
+
+            print(
+                "BAR COLOR TIMEOUT"
+            )
+
+            return None
+
+        time.sleep(0.03)
+
+    return None
+
+
+# =========================
 # FIND FISHING RECTANGLE
 # =========================
 
@@ -265,10 +332,20 @@ def find_player_line():
 
     for x in range(BAR_LEFT, BAR_RIGHT + 1):
 
+        # Ignore known false area
         if (
             IGNORE_LINE_LEFT
             <= x
             <= IGNORE_LINE_RIGHT
+        ):
+            continue
+
+        # Ignore the post-minigame
+        # false detection around 1139
+        if (
+            FAKE_LINE_LEFT
+            <= x
+            <= FAKE_LINE_RIGHT
         ):
             continue
 
@@ -426,21 +503,25 @@ def run_fishing_minigame():
     if not wait_for_minigame():
         return False
 
+    # Move to the bar area
     move_mouse_native(
         950,
         880
     )
 
-    time.sleep(0.05)
+    time.sleep(0.15)
 
-    bar_color = get_pixel(
-        BAR_SAMPLE_X,
-        BAR_SAMPLE_Y
-    )
+    # IMPORTANT:
+    # Wait for the REAL rectangle color
+    bar_color = get_bar_color()
 
-    print(
-        f"BAR COLOR: {bar_color}"
-    )
+    if bar_color is None:
+
+        print(
+            "COULD NOT FIND FISHING BAR."
+        )
+
+        return False
 
     start_time = time.monotonic()
 
@@ -448,9 +529,10 @@ def run_fishing_minigame():
 
     rectangle_center_clicked = False
 
+    hidden_since = None
+
     while running and not emergency_stop:
 
-        # Increased from 9 seconds to 20
         if (
             time.monotonic() - start_time
             > MINIGAME_TIMEOUT
@@ -460,7 +542,6 @@ def run_fishing_minigame():
                 "MINIGAME TIMEOUT"
             )
 
-            # Do NOT pretend the fish finished.
             return False
 
         bar = find_bar(bar_color)
@@ -470,6 +551,8 @@ def run_fishing_minigame():
         # =========================
 
         if bar is not None:
+
+            hidden_since = None
 
             left_x, right_x = bar
 
@@ -542,6 +625,22 @@ def run_fishing_minigame():
 
         else:
 
+            if hidden_since is None:
+                hidden_since = time.monotonic()
+
+            hidden_time = (
+                time.monotonic()
+                - hidden_since
+            )
+
+            # Don't instantly switch to fallback.
+            # Give the rectangle a moment to
+            # disappear/reappear.
+            if hidden_time < 0.08:
+
+                time.sleep(0.01)
+                continue
+
             print(
                 "BAR HIDDEN -> LINE FALLBACK"
             )
@@ -586,7 +685,6 @@ def fishing_loop():
         if not running:
 
             time.sleep(0.1)
-
             continue
 
         cycle_count += 1
@@ -596,7 +694,7 @@ def fishing_loop():
             f"{cycle_count} =========="
         )
 
-        # Move to Fish button
+        # Move to Fish
         move_mouse_native(
             FISH_BUTTON_X,
             FISH_BUTTON_Y
@@ -604,17 +702,18 @@ def fishing_loop():
 
         time.sleep(0.05)
 
-        # Click Fish ONCE
+        # ONE Fish click
         native_click()
 
         print(
             "FISH BUTTON CLICKED"
         )
 
-        # Give Roblox more time
-        time.sleep(AFTER_FISH_DELAY)
+        time.sleep(
+            AFTER_FISH_DELAY
+        )
 
-        # Wait for and play minigame
+        # Run minigame
         success = run_fishing_minigame()
 
         if not success:
@@ -624,20 +723,19 @@ def fishing_loop():
             )
 
             print(
-                "MACRO PAUSED TO PREVENT "
-                "ANOTHER FISH CLICK."
+                "MACRO PAUSED."
             )
 
             running = False
 
             continue
 
-        # Only reach this point when
-        # the minigame completed normally.
+        # =========================
+        # FISH RESULT
+        # =========================
 
         time.sleep(0.30)
 
-        # Move to result/close button
         move_mouse_native(
             RESULT_X,
             RESULT_Y
