@@ -40,8 +40,12 @@ IGNORE_LINE_RIGHT = 800
 
 CENTER_FALLBACK_CLICK_INTERVAL = 0.20
 
-MINIGAME_WAIT_TIMEOUT = 15.0
-MINIGAME_TIMEOUT = 9.0
+# Be patient
+MINIGAME_WAIT_TIMEOUT = 20.0
+MINIGAME_TIMEOUT = 20.0
+
+# Give Roblox time to open the minigame
+AFTER_FISH_DELAY = 0.50
 
 
 # =========================
@@ -62,6 +66,7 @@ def get_mouse_position():
 
 
 def move_mouse_native(target_x, target_y):
+
     while running and not emergency_stop:
 
         current_x, current_y = get_mouse_position()
@@ -98,6 +103,7 @@ def move_mouse_native(target_x, target_y):
 
 
 def native_click():
+
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -131,6 +137,7 @@ cycle_count = 0
 # =========================
 
 def toggle_macro():
+
     global running
 
     if emergency_stop:
@@ -145,6 +152,7 @@ def toggle_macro():
 
 
 def emergency_stop_macro():
+
     global running
     global emergency_stop
 
@@ -163,11 +171,14 @@ keyboard.add_hotkey("f3", emergency_stop_macro)
 # =========================
 
 def get_pixel(x, y):
+
     screenshot = pyautogui.screenshot()
+
     return screenshot.getpixel((x, y))
 
 
 def is_white(color):
+
     r, g, b = color
 
     return (
@@ -178,6 +189,7 @@ def is_white(color):
 
 
 def color_matches(color, target, tolerance):
+
     r1, g1, b1 = color
     r2, g2, b2 = target
 
@@ -209,6 +221,7 @@ def find_bar(bar_color):
             bar_color,
             BAR_COLOR_TOLERANCE
         ):
+
             left_x = x
             break
 
@@ -230,8 +243,11 @@ def find_bar(bar_color):
             bar_color,
             BAR_EDGE_TOLERANCE
         ):
+
             right_x = test_x
+
         else:
+
             break
 
     return left_x, right_x
@@ -269,6 +285,7 @@ def find_player_line():
                 g >= LINE_BRIGHTNESS and
                 b >= LINE_BRIGHTNESS
             ):
+
                 bright_count += 1
 
         if bright_count >= LINE_MIN_HEIGHT:
@@ -284,8 +301,11 @@ def find_player_line():
     for x in candidates[1:]:
 
         if x <= current_group[-1] + 2:
+
             current_group.append(x)
+
         else:
+
             groups.append(current_group)
             current_group = [x]
 
@@ -316,6 +336,7 @@ def center_fallback(
 
     distance = line_x - CENTER_X
 
+    # LEFT
     if distance < -CENTER_TOLERANCE:
 
         native_click()
@@ -327,6 +348,7 @@ def center_fallback(
 
         return time.monotonic()
 
+    # RIGHT
     if distance > CENTER_TOLERANCE:
 
         print(
@@ -336,6 +358,7 @@ def center_fallback(
 
         return last_fallback_click
 
+    # CENTER
     now = time.monotonic()
 
     if (
@@ -383,7 +406,9 @@ def wait_for_minigame():
             > MINIGAME_WAIT_TIMEOUT
         ):
 
-            print("MINIGAME WAIT TIMEOUT")
+            print(
+                "MINIGAME WAIT TIMEOUT"
+            )
 
             return False
 
@@ -425,14 +450,18 @@ def run_fishing_minigame():
 
     while running and not emergency_stop:
 
+        # Increased from 9 seconds to 20
         if (
             time.monotonic() - start_time
             > MINIGAME_TIMEOUT
         ):
 
-            print("MINIGAME TIMEOUT")
+            print(
+                "MINIGAME TIMEOUT"
+            )
 
-            break
+            # Do NOT pretend the fish finished.
+            return False
 
         bar = find_bar(bar_color)
 
@@ -503,7 +532,9 @@ def run_fishing_minigame():
                     "-> NO CLICK"
                 )
 
-            last_fallback_click = time.monotonic()
+            last_fallback_click = (
+                time.monotonic()
+            )
 
         # =========================
         # RECTANGLE HIDDEN
@@ -538,26 +569,7 @@ def run_fishing_minigame():
 
         time.sleep(0.01)
 
-    # =========================
-    # FINISH FISH
-    # =========================
-
-    if running and not emergency_stop:
-
-        time.sleep(0.30)
-
-        move_mouse_native(
-            RESULT_X,
-            RESULT_Y
-        )
-
-        time.sleep(0.70)
-
-        native_click()
-
-        time.sleep(0.30)
-
-    return True
+    return False
 
 
 # =========================
@@ -584,6 +596,7 @@ def fishing_loop():
             f"{cycle_count} =========="
         )
 
+        # Move to Fish button
         move_mouse_native(
             FISH_BUTTON_X,
             FISH_BUTTON_Y
@@ -591,34 +604,54 @@ def fishing_loop():
 
         time.sleep(0.05)
 
-        # CLICK FISH ONCE
+        # Click Fish ONCE
         native_click()
 
         print(
             "FISH BUTTON CLICKED"
         )
 
-        time.sleep(0.20)
+        # Give Roblox more time
+        time.sleep(AFTER_FISH_DELAY)
 
-        # Wait for the minigame.
-        # It will NOT click Fish again.
+        # Wait for and play minigame
         success = run_fishing_minigame()
 
         if not success:
 
             print(
-                "MINIGAME DID NOT START."
+                "\nMINIGAME DID NOT FINISH."
             )
 
             print(
-                "MACRO PAUSED."
+                "MACRO PAUSED TO PREVENT "
+                "ANOTHER FISH CLICK."
             )
 
             running = False
 
             continue
 
-        time.sleep(0.10)
+        # Only reach this point when
+        # the minigame completed normally.
+
+        time.sleep(0.30)
+
+        # Move to result/close button
+        move_mouse_native(
+            RESULT_X,
+            RESULT_Y
+        )
+
+        time.sleep(0.70)
+
+        native_click()
+
+        print(
+            "FISH RESULT CLICKED"
+        )
+
+        time.sleep(0.50)
 
 
 # =========================
