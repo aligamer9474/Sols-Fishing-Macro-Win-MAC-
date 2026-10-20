@@ -1,43 +1,51 @@
+import ctypes
 import time
 import threading
-import ctypes
-import ctypes.wintypes
 import pyautogui
 import keyboard
 
-
-# ============================================================
-# SETTINGS
-# ============================================================
+# ======================================
+# SOLS RNG FISHING MACRO
+# ======================================
 
 FISH_BUTTON = (853, 832)
 FISH_RESULT_CLOSE = (1113, 342)
 
 MINIGAME_START_PIXEL = (1176, 836)
 
-# EXACT old 1080p fishing line
 BAR_LEFT_X = 757
 BAR_RIGHT_X = 1161
 BAR_Y = 767
 
 ADVANCED_THRESHOLD = 25
 
-# Old macro timing
 FISHING_DETECTION_TIME = 9.0
+
+# How often the bar is scanned
 BAR_CHECK_DELAY = 0.010
+
+# Delay after a successful click
 SUCCESS_CLICK_DELAY = 0.025
 
-# After minigame
+# Panic clicks are MUCH slower now
+PANIC_CLICK_DELAY = 0.150
+
+# Don't panic immediately when the minigame starts
+PANIC_START_DELAY = 0.350
+
+# Re-learn the bar color after this many failed scans
+RELEARN_AFTER_MISSES = 12
+
+# Result X timing from old macro
 RESULT_MOVE_DELAY = 0.30
 RESULT_CLICK_DELAY = 0.70
 
-# Mouse movement
 MOUSE_TOLERANCE = 2
 
 
-# ============================================================
-# WINDOWS MOUSE
-# ============================================================
+# ======================================
+# WINDOWS MOUSE INPUT
+# ======================================
 
 user32 = ctypes.windll.user32
 
@@ -46,45 +54,50 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
 
+class POINT(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_long),
+        ("y", ctypes.c_long)
+    ]
+
+
 def get_mouse_position():
-
-    point = ctypes.wintypes.POINT()
-
-    user32.GetCursorPos(
-        ctypes.byref(point)
-    )
-
+    point = POINT()
+    user32.GetCursorPos(ctypes.byref(point))
     return point.x, point.y
 
 
-def move_mouse_native(target_x, target_y):
+def native_move_relative(dx, dy):
+    user32.mouse_event(
+        MOUSEEVENTF_MOVE,
+        int(dx),
+        int(dy),
+        0,
+        0
+    )
 
-    for _ in range(600):
 
-        if not running:
-            return False
+def move_mouse_to(x, y):
+    """
+    Move using relative Windows mouse input.
+    This is the method that Roblox actually recognizes.
+    """
 
+    while running:
         current_x, current_y = get_mouse_position()
 
-        dx = target_x - current_x
-        dy = target_y - current_y
+        dx = x - current_x
+        dy = y - current_y
 
-        if (
-            abs(dx) <= MOUSE_TOLERANCE
-            and abs(dy) <= MOUSE_TOLERANCE
-        ):
+        if abs(dx) <= MOUSE_TOLERANCE and abs(dy) <= MOUSE_TOLERANCE:
             return True
 
+        # Small steps prevent the Windows mouse acceleration
+        # from overshooting the target.
         step_x = max(-3, min(3, dx))
         step_y = max(-3, min(3, dy))
 
-        user32.mouse_event(
-            MOUSEEVENTF_MOVE,
-            int(step_x),
-            int(step_y),
-            0,
-            0
-        )
+        native_move_relative(step_x, step_y)
 
         time.sleep(0.004)
 
@@ -92,7 +105,6 @@ def move_mouse_native(target_x, target_y):
 
 
 def native_click():
-
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -101,7 +113,7 @@ def native_click():
         0
     )
 
-    time.sleep(0.008)
+    time.sleep(0.010)
 
     user32.mouse_event(
         MOUSEEVENTF_LEFTUP,
@@ -112,316 +124,392 @@ def native_click():
     )
 
 
-# ============================================================
-# SCREENSHOT
-# ============================================================
+# ======================================
+# GLOBAL STATE
+# ======================================
 
-def take_bar_screenshot():
+running = False
+emergency_stop = False
 
-    try:
-
-        return pyautogui.screenshot(
-            region=(
-                BAR_LEFT_X,
-                BAR_Y,
-                BAR_RIGHT_X - BAR_LEFT_X + 1,
-                1
-            )
-        )
-
-    except Exception:
-        return None
+cycle_count = 0
 
 
-# ============================================================
+# ======================================
 # COLOR HELPERS
-# ============================================================
+# ======================================
 
-def color_close(color1, color2, tolerance):
-
-    if color1 is None or color2 is None:
-        return False
-
+def color_distance(c1, c2):
     return (
-        abs(color1[0] - color2[0]) <= tolerance
-        and
-        abs(color1[1] - color2[1]) <= tolerance
-        and
-        abs(color1[2] - color2[2]) <= tolerance
+        abs(c1[0] - c2[0]) +
+        abs(c1[1] - c2[1]) +
+        abs(c1[2] - c2[2])
     )
 
 
 def is_white(color):
-
-    if color is None:
-        return False
+    r, g, b = color
 
     return (
-        color[0] >= 245
-        and color[1] >= 245
-        and color[2] >= 245
+        r > 240 and
+        g > 240 and
+        b > 240
     )
 
 
-# ============================================================
+def is_blackish(color):
+    r, g, b = color
+
+    return (
+        r < 8 and
+        g < 8 and
+        b < 8
+    )
+
+
+def is_reasonable_bar_color(color):
+    r, g, b = color
+
+    # Reject pure white / almost white UI
+    if r > 240 and g > 240 and b > 240:
+        return False
+
+    # Reject completely black background
+    if r < 8 and g < 8 and b < 8:
+        return False
+
+    # Reject very gray colors
+    maximum = max(r, g, b)
+    minimum = min(r, g, b)
+
+    if maximum - minimum < 15:
+        return False
+
+    return True
+
+
+# ======================================
+# SCREENSHOT
+# ======================================
+
+def take_bar_screenshot():
+    """
+    Capture the entire fishing line at once.
+
+    This is much faster than calling pyautogui.pixel()
+    hundreds of times.
+    """
+
+    return pyautogui.screenshot(
+        region=(
+            BAR_LEFT_X,
+            BAR_Y,
+            BAR_RIGHT_X - BAR_LEFT_X + 1,
+            1
+        )
+    )
+
+
+# ======================================
 # LEARN BAR COLOR
-# ============================================================
+# ======================================
 
 def learn_bar_color():
+    """
+    First uses the old macro's sample point:
+        X = 955
+        Y = 767
 
-    # --------------------------------------------------------
-    # EXACT OLD MACRO SAMPLE
-    # --------------------------------------------------------
+    If that point is bad, search nearby for a reasonable
+    colored pixel.
+    """
 
-    try:
+    screenshot = take_bar_screenshot()
 
-        screenshot = pyautogui.screenshot(
-            region=(
-                BAR_LEFT_X,
-                BAR_Y,
-                BAR_RIGHT_X - BAR_LEFT_X + 1,
-                1
-            )
-        )
+    sample_offset = 955 - BAR_LEFT_X
 
-    except Exception:
+    if 0 <= sample_offset < screenshot.width:
+        color = screenshot.getpixel((sample_offset, 0))
 
-        return None
-
-    # 955 - 757 = 198
-    old_sample_x = 955 - BAR_LEFT_X
-
-    color = screenshot.getpixel(
-        (old_sample_x, 0)
-    )
-
-    # If the old sample is usable, use it.
-    if color is not None and not is_white(color):
-
-        print(
-            f"Using old sample point: "
-            f"RGB{color}"
-        )
-
-        return color
-
-    # --------------------------------------------------------
-    # If the sample happens to be white, find a nearby
-    # non-white pixel.
-    # --------------------------------------------------------
-
-    for offset in range(-20, 21):
-
-        x = old_sample_x + offset
-
-        if x < 0 or x >= screenshot.width:
-            continue
-
-        color = screenshot.getpixel(
-            (x, 0)
-        )
-
-        if color is None:
-            continue
-
-        if not is_white(color):
-
+        if is_reasonable_bar_color(color):
             print(
-                f"Using nearby bar color: "
-                f"RGB{color}"
+                f"Using old sample point: RGB{color}"
             )
 
             return color
 
+    # Old sample was bad.
+    # Search around the old point.
+    for radius in range(1, 31):
+
+        for offset in (
+            sample_offset - radius,
+            sample_offset + radius
+        ):
+
+            if 0 <= offset < screenshot.width:
+
+                color = screenshot.getpixel((offset, 0))
+
+                if is_reasonable_bar_color(color):
+
+                    print(
+                        f"Using nearby bar color: RGB{color}"
+                    )
+
+                    return color
+
+    # If nothing useful was found, return None.
     return None
 
 
-# ============================================================
-# FIND RECTANGLE
-# ============================================================
+# ======================================
+# FIND BAR
+# ======================================
 
 def find_bar(bar_color, screenshot):
+    """
+    Find a contiguous rectangle matching the learned
+    fishing-bar color.
 
-    if screenshot is None:
+    Returns:
+        left_x
+        right_x
+        width
+        center_x
+    """
+
+    if bar_color is None:
         return None
 
-    left_x = None
+    pixels = screenshot.load()
 
-    # --------------------------------------------------------
-    # Same idea as old PixelSearch:
-    # scan left -> right for matching color.
-    # --------------------------------------------------------
+    best_left = None
+    best_right = None
+    best_width = 0
 
-    for local_x in range(
-        screenshot.width
-    ):
+    current_left = None
 
-        pixel = screenshot.getpixel(
-            (local_x, 0)
-        )
+    for x in range(screenshot.width):
 
-        if color_close(
-            pixel,
-            bar_color,
-            5
-        ):
+        color = pixels[x, 0]
 
-            left_x = BAR_LEFT_X + local_x
+        if color_distance(color, bar_color) <= 5 * 3:
 
-            break
-
-    # --------------------------------------------------------
-    # Nothing found
-    # --------------------------------------------------------
-
-    if left_x is None:
-        return None
-
-    # --------------------------------------------------------
-    # Expand right using tolerance 10,
-    # exactly like the old macro.
-    # --------------------------------------------------------
-
-    right_x = left_x
-
-    start_local = left_x - BAR_LEFT_X + 1
-
-    for local_x in range(
-        start_local,
-        screenshot.width
-    ):
-
-        pixel = screenshot.getpixel(
-            (local_x, 0)
-        )
-
-        if color_close(
-            pixel,
-            bar_color,
-            10
-        ):
-
-            right_x = BAR_LEFT_X + local_x
+            if current_left is None:
+                current_left = x
 
         else:
 
-            break
+            if current_left is not None:
+
+                current_right = x - 1
+                width = current_right - current_left + 1
+
+                if width > best_width:
+                    best_width = width
+                    best_left = current_left
+                    best_right = current_right
+
+                current_left = None
+
+    # Handle a run that reaches the end.
+    if current_left is not None:
+
+        current_right = screenshot.width - 1
+        width = current_right - current_left + 1
+
+        if width > best_width:
+            best_width = width
+            best_left = current_left
+            best_right = current_right
+
+    if best_left is None:
+        return None
+
+    # Convert screenshot coordinates back to screen coordinates.
+    left_x = BAR_LEFT_X + best_left
+    right_x = BAR_LEFT_X + best_right
 
     width = right_x - left_x
 
-    center = (
-        left_x + right_x
-    ) // 2
+    center_x = (left_x + right_x) // 2
 
     return (
         left_x,
         right_x,
         width,
-        center
+        center_x
     )
 
 
-# ============================================================
-# WAIT FOR MINIGAME
-# ============================================================
+# ======================================
+# DYNAMIC BAR SEARCH
+# ======================================
+
+def find_possible_bar(screenshot):
+    """
+    Backup detector.
+
+    If the original sampled color stops working,
+    look for a strong contiguous colored section
+    instead of immediately panic-clicking.
+    """
+
+    pixels = screenshot.load()
+
+    best_left = None
+    best_right = None
+    best_width = 0
+
+    current_left = None
+    previous_color = None
+
+    for x in range(screenshot.width):
+
+        color = pixels[x, 0]
+
+        valid = is_reasonable_bar_color(color)
+
+        if valid and previous_color is not None:
+
+            # Require neighboring pixels to have similar colors.
+            if color_distance(color, previous_color) > 90:
+                valid = False
+
+        if valid:
+
+            if current_left is None:
+                current_left = x
+
+            previous_color = color
+
+        else:
+
+            if current_left is not None:
+
+                current_right = x - 1
+                width = current_right - current_left + 1
+
+                # Fishing rectangle is normally more than 1 pixel.
+                if width >= 3 and width > best_width:
+                    best_width = width
+                    best_left = current_left
+                    best_right = current_right
+
+            current_left = None
+            previous_color = None
+
+    if current_left is not None:
+
+        current_right = screenshot.width - 1
+        width = current_right - current_left + 1
+
+        if width >= 3 and width > best_width:
+            best_width = width
+            best_left = current_left
+            best_right = current_right
+
+    if best_left is None:
+        return None
+
+    left_x = BAR_LEFT_X + best_left
+    right_x = BAR_LEFT_X + best_right
+
+    width = right_x - left_x
+
+    center_x = (left_x + right_x) // 2
+
+    return (
+        left_x,
+        right_x,
+        width,
+        center_x
+    )
+
+
+# ======================================
+# MINIGAME DETECTION
+# ======================================
 
 def wait_for_minigame():
-
     print()
     print("Waiting for minigame...")
 
-    start_time = time.time()
-    last_message = 0
+    start = time.time()
+    last_report = 0
 
     while running:
 
-        elapsed = (
-            time.time() - start_time
-        )
-
-        if elapsed - last_message >= 5:
-
-            print(
-                f"Still waiting... "
-                f"{elapsed:.1f}s"
-            )
-
-            last_message = elapsed
-
         try:
-
-            pixel = pyautogui.pixel(
+            color = pyautogui.pixel(
                 MINIGAME_START_PIXEL[0],
                 MINIGAME_START_PIXEL[1]
             )
 
         except Exception:
+            time.sleep(0.05)
+            continue
 
-            pixel = None
+        # Old macro checks for white at this location.
+        if is_white(color):
 
-        if pixel is not None:
+            elapsed = time.time() - start
 
-            if (
-                pixel[0] >= 245
-                and pixel[1] >= 245
-                and pixel[2] >= 245
-            ):
+            print(
+                f"Minigame detected after {elapsed:.1f} seconds!"
+            )
 
-                print(
-                    f"Minigame detected after "
-                    f"{elapsed:.1f} seconds!"
-                )
+            return True
 
-                return True
+        elapsed = time.time() - start
 
-        time.sleep(0.01)
+        if elapsed - last_report >= 5:
+
+            print(
+                f"Still waiting... {elapsed:.1f}s"
+            )
+
+            last_report = elapsed
+
+        time.sleep(0.05)
 
     return False
 
 
-# ============================================================
+# ======================================
 # FISHING MINIGAME
-# ============================================================
+# ======================================
 
 def fishing_minigame():
 
     print()
     print("======================================")
     print("FISHING MINIGAME")
-    print("OLD MACRO STYLE")
-    print("FAST SCREENSHOT SCANNING")
+    print("SMART BAR TRACKING")
     print("======================================")
 
-    # --------------------------------------------------------
-    # Learn bar color
-    # --------------------------------------------------------
-
-    bar_color = learn_bar_color()
-
-    if bar_color is None:
-
-        print(
-            "Could not learn bar color."
-        )
-
-        return False
-
     print(
-        f"Bar color learned: "
-        f"RGB({bar_color[0]}, "
-        f"{bar_color[1]}, "
-        f"{bar_color[2]})"
-    )
-
-    print(
-        f"Fishing line: "
-        f"X={BAR_LEFT_X}-{BAR_RIGHT_X}, "
+        f"Fishing line: X={BAR_LEFT_X}-{BAR_RIGHT_X}, "
         f"Y={BAR_Y}"
     )
 
-    # --------------------------------------------------------
-    # OLD 9 SECOND LOOP
-    # --------------------------------------------------------
+    bar_color = learn_bar_color()
+
+    if bar_color is not None:
+
+        print(
+            f"Bar color learned: RGB{bar_color}"
+        )
+
+    else:
+
+        print(
+            "Could not learn initial bar color."
+        )
+
+    print(
+        f"Advanced threshold: {ADVANCED_THRESHOLD}"
+    )
 
     start_time = time.time()
 
@@ -429,156 +517,247 @@ def fishing_minigame():
     detections = 0
     misses = 0
 
+    last_panic_click = time.time()
+
+    # Don't click immediately when minigame starts.
+    panic_allowed_at = (
+        time.time() + PANIC_START_DELAY
+    )
+
     while running:
 
-        if (
-            time.time() - start_time
-            >= FISHING_DETECTION_TIME
-        ):
+        if time.time() - start_time >= FISHING_DETECTION_TIME:
             break
-
-        # ----------------------------------------------------
-        # ONE screenshot instead of 400+ individual
-        # pyautogui.pixel() calls.
-        # ----------------------------------------------------
 
         screenshot = take_bar_screenshot()
 
-        bar = find_bar(
-            bar_color,
-            screenshot
-        )
+        found = None
 
-        # ----------------------------------------------------
-        # RECTANGLE FOUND
-        # ----------------------------------------------------
+        # --------------------------------------
+        # PRIMARY DETECTION
+        # --------------------------------------
 
-        if bar is not None:
+        if bar_color is not None:
 
-            left_x, right_x, width, center = bar
+            found = find_bar(
+                bar_color,
+                screenshot
+            )
+
+        # --------------------------------------
+        # BACKUP DETECTION
+        # --------------------------------------
+
+        if found is None:
+
+            misses += 1
+
+            # Re-learn color occasionally.
+            if misses >= RELEARN_AFTER_MISSES:
+
+                new_color = learn_bar_color()
+
+                if new_color is not None:
+
+                    bar_color = new_color
+
+                misses = 0
+
+                # Take a fresh screenshot after learning.
+                screenshot = take_bar_screenshot()
+
+                if bar_color is not None:
+
+                    found = find_bar(
+                        bar_color,
+                        screenshot
+                    )
+
+        # --------------------------------------
+        # BAR FOUND
+        # --------------------------------------
+
+        if found is not None:
+
+            left_x, right_x, width, center_x = found
 
             detections += 1
 
-            # Only print every few detections so CMD
-            # doesn't become insanely huge.
-            if detections % 5 == 0:
+            # Ignore microscopic false detections.
+            if width >= 2:
 
                 print(
-                    f"Bar X={left_x}-{right_x} "
+                    f"BAR FOUND: "
+                    f"{left_x}-{right_x} "
                     f"Width={width} "
-                    f"Center={center}"
+                    f"Center={center_x}"
                 )
 
-            # ------------------------------------------------
-            # OLD MACRO RULE
-            # ------------------------------------------------
+                # THIS IS THE IMPORTANT CHANGE:
+                # Actually move the mouse to the rectangle.
+                move_mouse_to(center_x, BAR_Y)
 
-            if width < ADVANCED_THRESHOLD:
+                if not running:
+                    break
 
-                native_click()
+                # Click when the bar is small enough,
+                # matching the old advanced detector.
+                if width < ADVANCED_THRESHOLD:
 
-                clicks += 1
+                    native_click()
 
-                print(
-                    f"CLICK #{clicks} "
-                    f"| Bar {left_x}-{right_x} "
-                    f"| Width {width}"
-                )
+                    clicks += 1
 
-                time.sleep(
-                    SUCCESS_CLICK_DELAY
-                )
+                    print(
+                        f"CLICK #{clicks} "
+                        f"at X={center_x}"
+                    )
 
-        # ----------------------------------------------------
+                    time.sleep(
+                        SUCCESS_CLICK_DELAY
+                    )
+
+                else:
+
+                    # The bar is currently too wide.
+                    # DO NOT panic-click.
+                    time.sleep(
+                        BAR_CHECK_DELAY
+                    )
+
+                continue
+
+        # --------------------------------------
         # BAR NOT FOUND
-        #
-        # This is what the old macro did:
-        # CLICK.
-        # ----------------------------------------------------
+        # --------------------------------------
 
-        else:
+        # This is where the old Python version went crazy.
+        # We now wait before doing a panic click.
+        now = time.time()
 
-            misses += 1
+        if (
+            now >= panic_allowed_at
+            and now - last_panic_click >= PANIC_CLICK_DELAY
+        ):
+
+            # Before panic clicking, move to the middle
+            # of the fishing area instead of randomly
+            # clicking wherever the cursor currently is.
+            move_mouse_to(
+                (BAR_LEFT_X + BAR_RIGHT_X) // 2,
+                BAR_Y
+            )
+
+            if not running:
+                break
 
             native_click()
 
             clicks += 1
 
-            if misses % 5 == 0:
+            print(
+                f"PANIC CLICK #{clicks} "
+                f"(bar not detected)"
+            )
 
-                print(
-                    f"Rapid click #{clicks} "
-                    f"| bar not detected"
-                )
+            last_panic_click = time.time()
 
-        time.sleep(
-            BAR_CHECK_DELAY
-        )
+        time.sleep(BAR_CHECK_DELAY)
 
     print()
-    print(
-        "Fishing detection finished."
-    )
-
+    print("Fishing detection finished.")
     print(
         f"Bar detections: {detections}"
     )
-
     print(
         f"Missed scans: {misses}"
     )
-
     print(
         f"Total clicks: {clicks}"
     )
 
-    return True
 
+# ======================================
+# FISHING CYCLE
+# ======================================
 
-# ============================================================
-# CLOSE RESULT
-# ============================================================
+def fishing_cycle():
 
-def close_fish_result():
+    global cycle_count
+
+    cycle_count += 1
+
+    print()
+    print("======================================")
+    print(f"FISHING CYCLE #{cycle_count}")
+    print("======================================")
+
+    # --------------------------------------
+    # FISH BUTTON
+    # --------------------------------------
+
+    print("Moving to Fish button...")
+
+    move_mouse_to(
+        FISH_BUTTON[0],
+        FISH_BUTTON[1]
+    )
 
     if not running:
-        return False
+        return
 
-    # --------------------------------------------------------
-    # OLD MACRO:
-    # sleep 300
-    # MouseMove X
-    # Sleep 700
-    # Click
-    # --------------------------------------------------------
+    print(
+        f"Mouse position: {get_mouse_position()}"
+    )
+
+    print("Clicking Fish...")
+
+    native_click()
+
+    time.sleep(0.20)
+
+    # --------------------------------------
+    # WAIT FOR MINIGAME
+    # --------------------------------------
+
+    if not wait_for_minigame():
+        return
+
+    if not running:
+        return
+
+    # --------------------------------------
+    # MINIGAME
+    # --------------------------------------
+
+    fishing_minigame()
+
+    if not running:
+        return
+
+    # --------------------------------------
+    # RESULT X
+    # OLD MACRO TIMING
+    # --------------------------------------
 
     print()
     print("Moving to fish-result X...")
 
-    time.sleep(
-        RESULT_MOVE_DELAY
-    )
+    time.sleep(RESULT_MOVE_DELAY)
 
-    if not running:
-        return False
-
-    if not move_mouse_native(
+    move_mouse_to(
         FISH_RESULT_CLOSE[0],
         FISH_RESULT_CLOSE[1]
-    ):
-        return False
-
-    print(
-        f"Mouse at X: "
-        f"{get_mouse_position()}"
-    )
-
-    time.sleep(
-        RESULT_CLICK_DELAY
     )
 
     if not running:
-        return False
+        return
+
+    print(
+        f"Mouse at X: {get_mouse_position()}"
+    )
+
+    time.sleep(RESULT_CLICK_DELAY)
 
     native_click()
 
@@ -586,143 +765,38 @@ def close_fish_result():
         "Fish-result X clicked."
     )
 
-    return True
-
-
-# ============================================================
-# FISHING CYCLE
-# ============================================================
-
-def fishing_cycle(cycle_number):
-
-    print()
-    print("======================================")
-    print(
-        f"FISHING CYCLE #{cycle_number}"
-    )
-    print("======================================")
-
-    # --------------------------------------------------------
-    # FISH BUTTON
-    # --------------------------------------------------------
-
-    print(
-        "Moving to Fish button..."
-    )
-
-    if not move_mouse_native(
-        FISH_BUTTON[0],
-        FISH_BUTTON[1]
-    ):
-        return False
-
-    print(
-        f"Mouse position: "
-        f"{get_mouse_position()}"
-    )
-
-    time.sleep(0.10)
-
-    if not running:
-        return False
-
-    print(
-        "Clicking Fish..."
-    )
-
-    native_click()
-
-    # --------------------------------------------------------
-    # WAIT FOR MINIGAME
-    # --------------------------------------------------------
-
-    if not wait_for_minigame():
-        return False
-
-    if not running:
-        return False
-
-    # --------------------------------------------------------
-    # MINIGAME
-    # --------------------------------------------------------
-
-    fishing_minigame()
-
-    if not running:
-        return False
-
-    # --------------------------------------------------------
-    # RESULT X
-    #
-    # Immediately proceeds to the X after the detection
-    # period. No extra 5-second wait.
-    # --------------------------------------------------------
-
-    if not close_fish_result():
-        return False
-
-    if not running:
-        return False
-
     time.sleep(0.30)
 
-    return True
+    print(
+        f"Cycle complete! Total cycles: {cycle_count}"
+    )
 
 
-# ============================================================
+# ======================================
 # MACRO LOOP
-# ============================================================
-
-running = False
-macro_thread = None
-cycle_count = 0
-
+# ======================================
 
 def macro_loop():
 
-    global cycle_count
-
-    cycle_count = 0
+    global running
 
     while running:
 
-        cycle_count += 1
-
-        success = fishing_cycle(
-            cycle_count
-        )
+        fishing_cycle()
 
         if not running:
             break
 
-        if not success:
-
-            print(
-                "Fishing cycle stopped."
-            )
-
-            break
-
-        print()
-        print(
-            f"Cycle complete! "
-            f"Total cycles: {cycle_count}"
-        )
-
-        time.sleep(0.20)
-
-    print()
-    print("Macro loop stopped.")
+        time.sleep(0.30)
 
 
-# ============================================================
+# ======================================
 # HOTKEYS
-# ============================================================
+# ======================================
 
-def start_pause_macro():
+def toggle_macro():
 
     global running
-    global macro_thread
 
     if running:
 
@@ -731,34 +805,36 @@ def start_pause_macro():
         print()
         print("Macro PAUSED.")
 
-        return
+    else:
 
-    running = True
+        running = True
 
-    print()
-    print("Macro STARTED.")
+        print()
+        print("Macro STARTED.")
 
-    macro_thread = threading.Thread(
-        target=macro_loop,
-        daemon=True
-    )
+        thread = threading.Thread(
+            target=macro_loop,
+            daemon=True
+        )
 
-    macro_thread.start()
+        thread.start()
 
 
 def emergency_stop():
 
     global running
+    global emergency_stop
 
+    emergency_stop = True
     running = False
 
     print()
     print("!!! EMERGENCY STOP !!!")
 
 
-# ============================================================
+# ======================================
 # MAIN
-# ============================================================
+# ======================================
 
 print("======================================")
 print("SOLS RNG FISHING MACRO")
@@ -766,25 +842,20 @@ print("======================================")
 print("F8 = Start / Pause")
 print("F3 = Emergency Stop")
 print()
-print("Old fishing behavior restored.")
+print("Smart rectangle tracking enabled.")
+print("Mouse will move to detected rectangle.")
+print("Panic clicks slowed to 150ms.")
+print("No instant panic clicking at minigame start.")
+print("Fast screenshot-based bar scanning.")
 print(
-    "Fast screenshot-based bar scanning."
-)
-print(
-    f"Fishing line: "
-    f"{BAR_LEFT_X}-{BAR_RIGHT_X} "
+    f"Fishing line: {BAR_LEFT_X}-{BAR_RIGHT_X} "
     f"at Y={BAR_Y}"
 )
 print(
-    f"Threshold: "
-    f"{ADVANCED_THRESHOLD}"
+    f"Threshold: {ADVANCED_THRESHOLD}"
 )
 print(
-    f"Detection time: "
-    f"{FISHING_DETECTION_TIME:.1f}s"
-)
-print(
-    "No slow panic cooldown."
+    f"Detection time: {FISHING_DETECTION_TIME}s"
 )
 print(
     "Result X has old 300ms/700ms timing."
@@ -794,7 +865,7 @@ print()
 
 keyboard.add_hotkey(
     "f8",
-    start_pause_macro
+    toggle_macro
 )
 
 keyboard.add_hotkey(
